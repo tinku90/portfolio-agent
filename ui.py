@@ -36,16 +36,16 @@ st.set_page_config(page_title="Portfolio Agent", page_icon="📈", layout="wide"
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def load():
-    with open(PORTFOLIO_FILE) as f:
+    with open(PORTFOLIO_FILE, encoding="utf-8") as f:
         pf = yaml.safe_load(f) or {}
-    with open(WATCHLIST_FILE) as f:
+    with open(WATCHLIST_FILE, encoding="utf-8") as f:
         wl = yaml.safe_load(f) or {}
     return pf.get("positions") or [], wl.get("candidates") or []
 
 def save(positions, watchlist):
-    with open(PORTFOLIO_FILE, "w") as f:
+    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
         yaml.dump({"positions": positions}, f, default_flow_style=False, allow_unicode=True)
-    with open(WATCHLIST_FILE, "w") as f:
+    with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
         yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
 
 def extract_text_from_image(raw: bytes, filename: str) -> str:

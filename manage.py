@@ -23,17 +23,17 @@ WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
 
 
 def load():
-    with open(PORTFOLIO_FILE) as f:
+    with open(PORTFOLIO_FILE, encoding='utf-8') as f:
         pf = yaml.safe_load(f) or {"positions": []}
-    with open(WATCHLIST_FILE) as f:
+    with open(WATCHLIST_FILE, encoding='utf-8') as f:
         wl = yaml.safe_load(f) or {"candidates": []}
     return pf["positions"] or [], wl["candidates"] or []
 
 
 def save(positions, watchlist):
-    with open(PORTFOLIO_FILE, "w") as f:
+    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
         yaml.dump({"positions": positions}, f, default_flow_style=False, allow_unicode=True)
-    with open(WATCHLIST_FILE, "w") as f:
+    with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
         yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
 
 

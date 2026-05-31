@@ -14,9 +14,9 @@ from src.notify import telegram
 ROOT = Path(__file__).parent.parent
 
 def load_config():
-    with open(ROOT / "config" / "portfolio.yaml") as f:
+    with open(ROOT / "config" / "portfolio.yaml", encoding='utf-8') as f:
         pf = yaml.safe_load(f)
-    with open(ROOT / "config" / "watchlist.yaml") as f:
+    with open(ROOT / "config" / "watchlist.yaml", encoding='utf-8') as f:
         wl = yaml.safe_load(f)
     return pf["positions"], wl["candidates"]
 
@@ -48,9 +48,9 @@ def _auto_tag_sectors(positions, watchlist):
         tag(w)
 
     if changed:
-        with open(pf_file, "w") as f:
+        with open(pf_file, "w", encoding="utf-8") as f:
             yaml.dump({"positions": positions}, f, default_flow_style=False, allow_unicode=True)
-        with open(wl_file, "w") as f:
+        with open(wl_file, "w", encoding="utf-8") as f:
             yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
     return changed
 
@@ -175,7 +175,7 @@ def job_hourly():
 def _update_yaml_valuation(ticker, result):
     """Write AI analysis results back to portfolio.yaml."""
     pf_file = ROOT / "config" / "portfolio.yaml"
-    with open(pf_file) as f:
+    with open(pf_file, encoding='utf-8') as f:
         pf = yaml.safe_load(f)
     for p in pf["positions"]:
         if p["ticker"] == ticker:
@@ -190,7 +190,7 @@ def _update_yaml_valuation(ticker, result):
                 opportunities  = result.get("opportunities", []),
             )
             break
-    with open(pf_file, "w") as f:
+    with open(pf_file, "w", encoding="utf-8") as f:
         yaml.dump(pf, f, default_flow_style=False, allow_unicode=True)
 
 def auto_analyze_new_positions():
