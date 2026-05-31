@@ -185,9 +185,17 @@ with tab1:
                 type=["pdf", "txt"],
                 key=f"up_{p['ticker']}",
             )
+            raw_text = st.text_area(
+                "Or paste raw text here (concall transcript, news article, annual report excerpt…)",
+                height=150,
+                key=f"raw_{p['ticker']}",
+                placeholder="Paste any text you want the AI to consider…",
+            )
 
             if st.button("▶  Run AI Analysis", key=f"run_{i}", type="primary"):
                 docs = [(uf.name, extract_text(uf)) for uf in (uploads or [])]
+                if raw_text.strip():
+                    docs.append(("pasted_text", raw_text.strip()))
                 with st.spinner("Analysing with Groq LLM — this takes ~10 seconds…"):
                     result = run_analysis(p["ticker"], p["market"], p["avg_cost"], recent_news, docs)
 
