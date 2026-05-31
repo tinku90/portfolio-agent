@@ -16,6 +16,41 @@ def send(text: str, parse_mode: str = "Markdown"):
     except Exception as e:
         print(f"Telegram send failed: {e}")
 
+def alert_sector_forecasts(in_forecasts: list, us_forecasts: list,
+                            comparisons: list = None):
+    """Send top-20 sector growth forecast digest."""
+    def _block(forecasts, label):
+        msg = f"*{label}*\n"
+        for f in forecasts:
+            refreshed = " *" if f.get("refreshed") else ""
+            msg += (f"`{f['sector'][:30]:<30}` "
+                    f"{f['growth_low']:.0f}–{f['growth_high']:.0f}%  "
+                    f"_{f['source']}{refreshed}_\n")
+        return msg
+
+    header  = "*SECTOR GROWTH FORECASTS — Expert Consensus*\n"
+    header += f"_{in_forecasts[0].get('forecast_year','FY2025-26')} estimates. * = refreshed from live news_\n\n"
+
+    in_block = _block(in_forecasts,  "INDIA — Top 20 Sectors")
+    us_block = _block(us_forecasts,  "US — Top 20 Sectors")
+
+    # Split into 3 messages to stay under 4000 char Telegram limit
+    send(header + in_block)
+    send(us_block)
+
+    if comparisons:
+        comp_msg = "*YOUR PORTFOLIO vs EXPERT CONSENSUS*\n\n"
+        for c in comparisons:
+            if c.get("status") == "no_mgmt_estimate":
+                continue
+            comp_msg += (f"{c['emoji']} *{c['ticker']}* ({c['sector']})\n"
+                         f"  Mgmt: `{c['mgmt_growth']}%` | Expert: "
+                         f"`{c['expert_low']:.0f}–{c['expert_high']:.0f}%`"
+                         f" | *{c['verdict']}*\n"
+                         f"  _{c['note']}_\n\n")
+        if comp_msg.strip():
+            send(comp_msg)
+
 def alert_sector_impact(news_title, result):
     sentiment_emoji = {"BULLISH": "🟢", "NEUTRAL": "🟡", "BEARISH": "🔴"}
     impact_emoji    = {"HIGH": "🔥", "MEDIUM": "⚡", "LOW": "💧", "NONE": "✅"}

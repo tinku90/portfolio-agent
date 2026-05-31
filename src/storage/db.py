@@ -12,6 +12,15 @@ CREATE TABLE IF NOT EXISTS filings (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker
 CREATE TABLE IF NOT EXISTS news (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, title TEXT, url TEXT, published TEXT, material INTEGER DEFAULT 0, summary TEXT, UNIQUE(ticker, url));
 CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, kind TEXT, payload TEXT, sent_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS valuations (id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, pe REAL, growth_pct REAL, peg REAL, fair_value REAL, current_price REAL, mos REAL, computed_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS sector_forecasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sector TEXT, market TEXT,
+    growth_low REAL, growth_high REAL,
+    source TEXT, headline TEXT,
+    forecast_year TEXT,
+    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(sector, market, forecast_year) ON CONFLICT REPLACE
+);
 CREATE INDEX IF NOT EXISTS idx_filings_unprocessed ON filings(processed) WHERE processed=0;
 CREATE INDEX IF NOT EXISTS idx_news_unprocessed ON news(material) WHERE material IS NULL;
 """
@@ -84,6 +93,21 @@ def save_valuation(ticker, pe, growth_pct, peg, fair_value, current_price, mos):
 def all_positions():
     with conn() as c:
         return [dict(r) for r in c.execute("SELECT * FROM positions")]
+
+def save_sector_forecast(sector, market, growth_low, growth_high, source, headline, forecast_year):
+    with conn() as c:
+        c.execute("""INSERT OR REPLACE INTO sector_forecasts
+                     (sector, market, growth_low, growth_high, source, headline, forecast_year)
+                     VALUES (?,?,?,?,?,?,?)""",
+                  (sector, market, growth_low, growth_high, source, headline, forecast_year))
+
+def get_sector_forecasts(market=None):
+    with conn() as c:
+        if market:
+            return [dict(r) for r in c.execute(
+                "SELECT * FROM sector_forecasts WHERE market=? ORDER BY sector", (market,))]
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM sector_forecasts ORDER BY market, sector")]
 
 def all_watchlist():
     with conn() as c:

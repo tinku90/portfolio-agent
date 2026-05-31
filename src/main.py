@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.storage import db
-from src.data import prices, filings_in, filings_us, news, sector_news
-from src.analysis import valuation, materiality, rerating, ai_valuation, news_rerate, sector_impact
+from src.data import prices, filings_in, filings_us, news, sector_news, industry_growth
+from src.analysis import valuation, materiality, rerating, ai_valuation, news_rerate, sector_impact, growth_comparison
 from src.notify import telegram
 
 ROOT = Path(__file__).parent.parent
@@ -337,9 +337,41 @@ def _run_sector_macro_scan():
             }))
 
 
+def run_sector_forecast_digest():
+    """Fetch top-20 sector growth forecasts (IN + US), save to DB, send Telegram."""
+    print("Building India sector forecasts...")
+    in_forecasts = industry_growth.build_sector_forecasts("IN")
+    print("Building US sector forecasts...")
+    us_forecasts = industry_growth.build_sector_forecasts("US")
+
+    # Save to DB
+    for f in in_forecasts + us_forecasts:
+        db.save_sector_forecast(
+            f["sector"], f["market"],
+            f["growth_low"], f["growth_high"],
+            f["source"], f["headline"], f["forecast_year"],
+        )
+
+    # Compare portfolio + watchlist stocks against their sector forecast
+    positions, watchlist = load_config()
+    all_stocks    = positions + list(watchlist)
+    all_forecasts = {f["sector"]: f for f in in_forecasts + us_forecasts}
+    comparisons   = []
+    for stock in all_stocks:
+        mapped_sector = growth_comparison.map_sector(stock)
+        fc = all_forecasts.get(mapped_sector)
+        if fc:
+            stock_with_sector = {**stock, "sector": mapped_sector}
+            comparisons.append(growth_comparison.compare(stock_with_sector, fc))
+
+    telegram.alert_sector_forecasts(in_forecasts, us_forecasts, comparisons)
+    print(f"Sector forecast digest sent. IN:{len(in_forecasts)} US:{len(us_forecasts)} comparisons:{len(comparisons)}")
+
+
 def job_weekly():
     """Sunday digest."""
     bootstrap()
+    run_sector_forecast_digest()
     with db.conn() as c:
         recent = [dict(r) for r in c.execute(
             "SELECT * FROM alerts WHERE sent_at > datetime('now','-7 days') ORDER BY sent_at DESC"
