@@ -21,4 +21,4 @@ jobs:
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "data: daily run"
-          file_pattern: data/*.db
+          file_pattern: data/*.db config/*.yaml
