@@ -44,6 +44,37 @@ def alert_rerating(ticker, position, rerating):
         msg += f"\n_New risks:_ " + ", ".join(risks)
     send(msg)
 
+def alert_news_rerate(ticker, market, news_title, r):
+    verdict_emoji = {"ACCUMULATE": "🟢", "HOLD": "🟡", "TRIM": "🔴", "EXIT": "⛔"}.get(r.get("verdict", ""), "⚪")
+    prev_g, new_g = r.get("prev_growth_pct", 0), r.get("new_growth_pct", 0)
+    arrow = "⬆️" if new_g > prev_g else ("⬇️" if new_g < prev_g else "➡️")
+    msg  = f"*NEWS RERATE: {ticker}* ({market})\n\n"
+    msg += f"📰 _{news_title[:120]}_\n\n"
+    bullets = r.get("summary_bullets", [])
+    if bullets:
+        msg += "*Summary:*\n" + "".join(f"• {b}\n" for b in bullets) + "\n"
+    msg += f"*Growth revision:* {prev_g}% → {new_g}% {arrow}\n"
+    msg += f"_{r.get('growth_change_reason', '')}_\n\n"
+    msg += f"*Updated valuation:*\n"
+    msg += f"PEG — FV: `{r.get('new_peg_fair_value')}` | Target: `{r.get('new_peg_target')}`\n"
+    msg += f"DCF — FV: `{r.get('new_dcf_fair_value')}` | Target: `{r.get('new_dcf_target')}`\n\n"
+    msg += f"*Verdict: {verdict_emoji} {r.get('verdict')}*\n"
+    msg += f"_{r.get('verdict_reason', '')}_\n\n"
+    msg += f"*Action:* {r.get('action', '')}"
+    send(msg)
+
+def alert_annual_report_analysis(ticker, market, result):
+    msg  = f"*ANNUAL REPORT ANALYSIS: {ticker}* ({market})\n\n"
+    msg += f"*PEG* — FV: `{result.get('peg_fair_value')}` | Target: `{result.get('peg_target_12m')}`\n"
+    msg += f"*DCF* — FV: `{result.get('dcf_fair_value')}` | Target: `{result.get('dcf_target_12m')}`\n"
+    msg += f"*Stop Loss:* `{result.get('stop_loss')}`\n\n"
+    msg += f"_{result.get('thesis', '')}_\n\n"
+    if result.get("risks"):
+        msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"
+    if result.get("opportunities"):
+        msg += "*Opportunities:*\n" + "".join(f"🚀 {o}\n" for o in result["opportunities"][:3])
+    send(msg)
+
 def alert_opportunity(v):
     msg = f"*OPPORTUNITY: {v['ticker']}* ({v['market']})\n"
     msg += f"Signal: *{v['signal']}*\n"

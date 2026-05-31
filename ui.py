@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 import base64
 import pandas as pd
 import pdfplumber
+import docx
 from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
@@ -67,6 +68,9 @@ def extract_text(uploaded_file) -> str:
                 for page in pdf.pages[:30]:
                     text += (page.extract_text() or "") + "\n"
             return text[:40000]
+        elif name.endswith((".doc", ".docx")):
+            doc = docx.Document(io.BytesIO(raw))
+            return "\n".join(p.text for p in doc.paragraphs)[:40000]
         elif name.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(raw))
             return df.to_string(index=False)[:40000]
@@ -158,11 +162,11 @@ with tab1:
 
             st.markdown("---")
             st.markdown("#### Upload documents *(optional)*")
-            st.caption("Accepted: PDF, TXT, JPG/PNG (screenshots), XLS/CSV (financials) — concall transcripts, annual reports, screener exports")
+            st.caption("Accepted: PDF, Word (DOC/DOCX), TXT, JPG/PNG, XLS/XLSX, CSV — concall transcripts, annual reports, screener exports")
             uploads = st.file_uploader(
                 "Drop files here",
                 accept_multiple_files=True,
-                type=["pdf", "txt", "jpg", "jpeg", "png", "xls", "xlsx", "csv"],
+                type=["pdf", "txt", "jpg", "jpeg", "png", "xls", "xlsx", "csv", "doc", "docx"],
                 key=f"up_{p['ticker']}",
             )
             raw_text = st.text_area(
@@ -220,35 +224,80 @@ with tab1:
 
     # ── add position form ──────────────────────────────────────────────────────
     st.subheader("➕  Add a Position")
-    st.caption("Only enter what you know. Fair value, target, and stop-loss are auto-calculated by AI Analysis.")
-    with st.form("add_pos", clear_on_submit=True):
-        a1, a2, a3, a4 = st.columns(4)
-        new_ticker   = a1.text_input("Ticker *",         placeholder="INFY / NVDA").upper().strip()
-        new_market   = a2.selectbox("Market *",           ["IN", "US"])
-        new_qty      = a3.number_input("Quantity *",      min_value=0.01, step=1.0)
-        new_avg_cost = a4.number_input("Avg Buy Price *", min_value=0.01, step=0.5)
+    st.caption("Upload documents to get fair value immediately, or leave blank to analyze later.")
 
-        if st.form_submit_button("Add to Portfolio", type="primary"):
-            if not new_ticker:
-                st.error("Ticker is required.")
-            elif any(p["ticker"] == new_ticker for p in positions):
-                st.error(f"{new_ticker} is already in portfolio.")
+    a1, a2, a3, a4 = st.columns(4)
+    new_ticker   = a1.text_input("Ticker *", placeholder="INFY / NVDA", key="add_ticker").upper().strip()
+    new_market   = a2.selectbox("Market *", ["IN", "US"], key="add_market")
+    new_qty      = a3.number_input("Quantity *", min_value=0.01, step=1.0, key="add_qty")
+    new_avg_cost = a4.number_input("Avg Buy Price *", min_value=0.01, step=0.5, key="add_cost")
+
+    add_uploads  = st.file_uploader(
+        "Documents for instant valuation *(optional — PDF, TXT, JPG, PNG, XLS, CSV)*",
+        accept_multiple_files=True,
+        type=["pdf", "txt", "jpg", "jpeg", "png", "xls", "xlsx", "csv", "doc", "docx"],
+        key="add_uploads",
+    )
+    add_raw_text = st.text_area(
+        "Or paste text *(annual report excerpt, concall transcript…)*",
+        height=100, key="add_raw_text",
+        placeholder="Paste any text for the AI to use in valuation…",
+    )
+
+    if st.button("Add to Portfolio", type="primary", key="add_btn"):
+        if not new_ticker:
+            st.error("Ticker is required.")
+        elif any(p["ticker"] == new_ticker for p in positions):
+            st.error(f"{new_ticker} is already in portfolio.")
+        else:
+            new_pos = {
+                "ticker": new_ticker, "market": new_market,
+                "qty": float(new_qty), "avg_cost": float(new_avg_cost),
+                "entry_date": str(date.today()), "thesis": "Pending analysis",
+                "fair_value": 0, "dcf_fair_value": 0,
+                "stop_loss": 0, "target": 0, "dcf_target": 0,
+            }
+            has_docs = bool(add_uploads or (add_raw_text or "").strip())
+            if has_docs:
+                docs = [(uf.name, extract_text(uf)) for uf in (add_uploads or [])]
+                if (add_raw_text or "").strip():
+                    docs.append(("pasted_text", add_raw_text.strip()))
+                with st.spinner(f"Analysing {new_ticker} with Groq…"):
+                    price_data    = get_price(new_ticker, new_market)
+                    current_price = price_data.get("price", new_avg_cost) if "error" not in price_data else new_avg_cost
+                    currency      = price_data.get("currency", "INR" if new_market == "IN" else "USD")
+                    result = _analyze(new_ticker, new_market, new_avg_cost, current_price, currency, [], docs)
+                if "error" not in result:
+                    new_pos.update(
+                        fair_value     = result.get("peg_fair_value", 0),
+                        target         = result.get("peg_target_12m", 0),
+                        dcf_fair_value = result.get("dcf_fair_value", 0),
+                        dcf_target     = result.get("dcf_target_12m", 0),
+                        stop_loss      = result.get("stop_loss", 0),
+                        thesis         = result.get("thesis", "Pending analysis"),
+                        risks          = result.get("risks", []),
+                        opportunities  = result.get("opportunities", []),
+                    )
+                    positions.append(new_pos)
+                    save(positions, watchlist)
+                    st.success(f"✅ {new_ticker} added with AI valuation!")
+                    r1, r2, r3, r4, r5 = st.columns(5)
+                    r1.metric("FV — PEG",     f"{result.get('peg_fair_value',0):,.0f}")
+                    r2.metric("Target — PEG", f"{result.get('peg_target_12m',0):,.0f}")
+                    r3.metric("FV — DCF",     f"{result.get('dcf_fair_value',0):,.0f}")
+                    r4.metric("Target — DCF", f"{result.get('dcf_target_12m',0):,.0f}")
+                    r5.metric("Stop Loss",    f"{result.get('stop_loss',0):,.0f}")
+                    st.markdown(f"**Thesis:** {result.get('thesis','')}")
+                    st.rerun()
+                else:
+                    st.warning(f"Analysis failed ({result['error']}), stock added without valuation.")
+                    positions.append(new_pos)
+                    save(positions, watchlist)
+                    st.rerun()
             else:
-                positions.append({
-                    "ticker":        new_ticker,
-                    "market":        new_market,
-                    "qty":           float(new_qty),
-                    "avg_cost":      float(new_avg_cost),
-                    "entry_date":    str(date.today()),
-                    "thesis":        "Pending analysis",
-                    "fair_value":    0,
-                    "dcf_fair_value":0,
-                    "stop_loss":     0,
-                    "target":        0,
-                    "dcf_target":    0,
-                })
+                positions.append(new_pos)
                 save(positions, watchlist)
-                st.success(f"✅ {new_ticker} added! Click **AI Analysis** to generate fair value and target.")
+                st.success(f"✅ {new_ticker} added. Upload documents via **AI Analysis** to calculate fair value.")
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════

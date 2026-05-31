@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.storage import db
 from src.data import prices, filings_in, filings_us, news
-from src.analysis import valuation, materiality, rerating, ai_valuation
+from src.analysis import valuation, materiality, rerating, ai_valuation, news_rerate
 from src.notify import telegram
 
 ROOT = Path(__file__).parent.parent
@@ -48,6 +48,10 @@ def job_hourly():
             telegram.alert_price(p)
             db.log_alert(pos["ticker"], "price", json.dumps(p))
 
+    positions_map = {p["ticker"]: p for p in db.all_positions()}
+    ANNUAL_KEYWORDS = ["annual report", "10-k", "10k", "fy result", "full year result",
+                       "audited result", "q4 result", "fourth quarter"]
+
     # 2. Filing scan
     for stock in all_tickers:
         try:
@@ -63,22 +67,40 @@ def job_hourly():
             fid = db.save_filing(f["ticker"], f["source"], f["title"], f["url"], f["published"])
             if not fid:
                 continue
-            # Is it a results filing? Trigger rerating
-            is_result = (filings_in.is_results_filing if stock["market"] == "IN" else filings_us.is_results_filing)(f["title"])
-            position = next((p for p in db.all_positions() if p["ticker"] == stock["ticker"]), None)
-            if is_result and position:
+
+            title_lower = f["title"].lower()
+            position    = positions_map.get(stock["ticker"])
+            is_annual   = any(k in title_lower for k in ANNUAL_KEYWORDS)
+            is_result   = (filings_in.is_results_filing if stock["market"] == "IN"
+                           else filings_us.is_results_filing)(f["title"])
+
+            if is_annual and position:
+                # Full AI re-analysis from annual report PDF
+                pdf_text = rerating.extract_pdf_text(f["url"]) if f["url"].endswith(".pdf") else f["title"]
+                price_data    = prices.get_price(stock["ticker"], stock["market"])
+                current_price = price_data.get("price", position["avg_cost"]) if "error" not in price_data else position["avg_cost"]
+                currency      = price_data.get("currency", "INR" if stock["market"] == "IN" else "USD")
+                result = ai_valuation.analyze_position(
+                    stock["ticker"], stock["market"], position["avg_cost"],
+                    current_price, currency, [], [("annual_report", pdf_text)]
+                )
+                if "error" not in result:
+                    _update_yaml_valuation(stock["ticker"], result)
+                    telegram.alert_annual_report_analysis(stock["ticker"], stock["market"], result)
+                    db.log_alert(stock["ticker"], "annual_report_analysis", json.dumps(result))
+            elif is_result and position:
                 text = rerating.extract_pdf_text(f["url"]) if f["url"].endswith(".pdf") else f["title"]
                 rr = rerating.rerate(position, text)
                 if "error" not in rr:
                     telegram.alert_rerating(stock["ticker"], position, rr)
                     db.log_alert(stock["ticker"], "rerating", json.dumps(rr))
                 else:
-                    telegram.alert_filing(f, summary="Results filing detected — manual review needed")
+                    telegram.alert_filing(f, summary="Results filing — manual review needed")
             else:
                 telegram.alert_filing(f)
             db.mark_processed(fid)
 
-    # 3. News scan (deduplicated — Groq only called on headlines not seen before)
+    # 3. News scan — material news on positions triggers full rerate with growth diff
     for stock in all_tickers:
         try:
             items = news.fetch_news(stock["ticker"], stock["market"], stock.get("thesis", "")[:50])
@@ -92,9 +114,25 @@ def job_hourly():
             cls = materiality.classify(stock["ticker"], n["title"])
             summary = None
             if cls["material"]:
-                summary = materiality.summarize(stock["ticker"], n["title"], stock.get("thesis", ""))
-                telegram.alert_filing({"ticker": stock["ticker"], "source": "News", "title": n["title"], "url": n["url"]}, summary=summary)
-                db.log_alert(stock["ticker"], "news_material", json.dumps({"title": n["title"], "summary": summary}))
+                position = positions_map.get(stock["ticker"])
+                if position and position.get("fair_value"):
+                    # Full news rerate with growth comparison for held positions
+                    rr = news_rerate.rerate_on_news(position, n["title"])
+                    if "error" not in rr:
+                        telegram.alert_news_rerate(stock["ticker"], stock["market"], n["title"], rr)
+                        db.log_alert(stock["ticker"], "news_rerate", json.dumps(rr))
+                        summary = " | ".join(rr.get("summary_bullets", [])[:2])
+                    else:
+                        summary = materiality.summarize(stock["ticker"], n["title"], stock.get("thesis", ""))
+                        telegram.alert_filing({"ticker": stock["ticker"], "source": "News",
+                                               "title": n["title"], "url": n["url"]}, summary=summary)
+                        db.log_alert(stock["ticker"], "news_material", json.dumps({"title": n["title"], "summary": summary}))
+                else:
+                    # Watchlist or unanalyzed position — simple summary
+                    summary = materiality.summarize(stock["ticker"], n["title"], stock.get("thesis", ""))
+                    telegram.alert_filing({"ticker": stock["ticker"], "source": "News",
+                                           "title": n["title"], "url": n["url"]}, summary=summary)
+                    db.log_alert(stock["ticker"], "news_material", json.dumps({"title": n["title"], "summary": summary}))
             db.update_news_materiality(nid, cls["material"], summary)
 
 def _update_yaml_valuation(ticker, result):
