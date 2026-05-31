@@ -15,7 +15,8 @@ import docx
 from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
-from src.analysis.ai_valuation import analyze_position as _analyze, analyze_watchlist as _analyze_wl
+from src.analysis.ai_valuation import analyze_position as _analyze
+from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
 
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
