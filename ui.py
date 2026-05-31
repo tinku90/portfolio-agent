@@ -13,50 +13,15 @@ import base64
 import pandas as pd
 import pdfplumber
 import docx
-from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
 from src.analysis.ai_valuation import analyze_position as _analyze
+from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl
+from src.analysis.llm_client import complete_vision
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
-
-def _analyze_wl(ticker, market, current_price, currency, news_items=None, extra_texts=None):
-    import os, json
-    from groq import Groq
-    key = os.environ.get("GROQ_API_KEY", "")
-    if not key:
-        return {"error": "GROQ_API_KEY not set"}
-    news_text = "\n".join(f"- {n['title']}" for n in (news_items or [])[:10]) or "No recent news."
-    docs_section = (
-        "Uploaded documents:\n" + "\n\n---\n\n".join(f"[{n}]:\n{t[:15000]}" for n, t in extra_texts)
-        if extra_texts else "No documents — use news and general knowledge."
-    )
-    prompt = f"""Analyze {ticker} ({market}) as a potential buy. Price: {current_price} {currency}.
-
-News: {news_text}
-
-{docs_section}
-
-Compute using BOTH methods:
-A) PEG: fair_PE = growth%, PEG_FV = EPS*(1+g)^2*fair_PE, target = FV*1.10
-B) DCF: 5-year, 3% terminal, 12% discount IN / 10% US, target = FV*1.08
-
-Return ONLY JSON:
-{{"expected_growth_pct":<n>,"peg_fair_value":<n>,"peg_target_12m":<n>,"dcf_fair_value":<n>,"dcf_target_12m":<n>,"suggested_peg_threshold":<n>,"suggested_mos_pct":<n>,"entry_price":<n>,"thesis":"...","risks":["..."],"opportunities":["..."],"valuation_basis":"..."}}"""
-    try:
-        resp = Groq(api_key=key).chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.1, max_tokens=1000,
-        )
-        return json.loads(resp.choices[0].message.content)
-    except Exception as e:
-        return {"error": str(e)}
 
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
-GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
-
 st.set_page_config(page_title="Portfolio Agent", page_icon="📈", layout="wide")
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -75,24 +40,14 @@ def save(positions, watchlist):
         yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
 
 def extract_text_from_image(raw: bytes, filename: str) -> str:
-    try:
-        ext  = filename.lower().rsplit(".", 1)[-1]
-        mime = "image/png" if ext == "png" else "image/jpeg"
-        b64  = base64.b64encode(raw).decode()
-        resp = Groq(api_key=GROQ_KEY).chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                {"type": "text", "text": (
-                    "Extract all text and financial data visible in this image. "
-                    "If it contains tables or charts, describe the key numbers and trends clearly."
-                )},
-            ]}],
-            max_tokens=2000,
-        )
-        return resp.choices[0].message.content
-    except Exception as e:
-        return f"[Image extraction failed: {e}]"
+    ext  = filename.lower().rsplit(".", 1)[-1]
+    mime = "image/png" if ext == "png" else "image/jpeg"
+    b64  = base64.b64encode(raw).decode()
+    return complete_vision(
+        "Extract all text and financial data visible in this image. "
+        "If it contains tables or charts, describe the key numbers and trends clearly.",
+        b64, mime=mime, max_tokens=2000,
+    )
 
 def extract_text(uploaded_file) -> str:
     try:
@@ -239,7 +194,7 @@ with tab1:
                 docs = [(uf.name, extract_text(uf)) for uf in (uploads or [])]
                 if raw_text.strip():
                     docs.append(("pasted_text", raw_text.strip()))
-                with st.spinner("Analysing with Groq LLM — this takes ~10 seconds…"):
+                with st.spinner("Analysing (Groq → Gemini → OpenAI fallback)…"):
                     result = run_analysis(p["ticker"], p["market"], p["avg_cost"], recent_news, docs)
 
                 if "error" in result:
@@ -322,7 +277,7 @@ with tab1:
                 docs = [(uf.name, extract_text(uf)) for uf in (add_uploads or [])]
                 if (add_raw_text or "").strip():
                     docs.append(("pasted_text", add_raw_text.strip()))
-                with st.spinner(f"Analysing {new_ticker} with Groq…"):
+                with st.spinner(f"Analysing {new_ticker} (Groq → Gemini → OpenAI)…"):
                     price_data    = get_price(new_ticker, new_market)
                     current_price = price_data.get("price", new_avg_cost) if "error" not in price_data else new_avg_cost
                     currency      = price_data.get("currency", "INR" if new_market == "IN" else "USD")
@@ -459,7 +414,7 @@ with tab2:
                 price_data    = get_price(w["ticker"], w["market"])
                 current_price = price_data.get("price", 0) if "error" not in price_data else 0
                 currency      = price_data.get("currency", "INR" if w["market"] == "IN" else "USD")
-                with st.spinner("Analysing with Groq LLM…"):
+                with st.spinner("Analysing (Groq → Gemini → OpenAI fallback)…"):
                     result = _analyze_wl(w["ticker"], w["market"], current_price, currency, wl_news, docs or None)
 
                 if "error" in result:
