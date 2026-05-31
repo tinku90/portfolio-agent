@@ -16,6 +16,22 @@ def send(text: str, parse_mode: str = "Markdown"):
     except Exception as e:
         print(f"Telegram send failed: {e}")
 
+def alert_sector_impact(news_title, result):
+    sentiment_emoji = {"BULLISH": "🟢", "NEUTRAL": "🟡", "BEARISH": "🔴"}
+    impact_emoji    = {"HIGH": "🔥", "MEDIUM": "⚡", "LOW": "💧", "NONE": "✅"}
+    msg  = f"*MACRO/SECTOR ALERT*\n\n"
+    msg += f"*News:* _{news_title[:120]}_\n\n"
+    msg += f"*Theme:* {result.get('macro_theme', '')}\n"
+    msg += f"_{result.get('sector_summary', '')}_\n\n"
+    msg += "*Impact on your portfolio:*\n"
+    for s in result.get("stocks", []):
+        ie = impact_emoji.get(s.get("impact", "NONE"), "")
+        se = sentiment_emoji.get(s.get("sentiment", "NEUTRAL"), "")
+        msg += f"{ie} *{s['ticker']}* — {s.get('impact','?')} {se}\n"
+        msg += f"  _{s.get('reason', '')}_\n"
+        msg += f"  Action: {s.get('action', '')}\n\n"
+    send(msg)
+
 def alert_price(p):
     msg = f"*Price alert: {p['ticker']}* ({p['market']})\n"
     msg += f"Current: {p['price']:.2f} {p['currency']}\n"

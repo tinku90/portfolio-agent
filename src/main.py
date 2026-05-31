@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.storage import db
-from src.data import prices, filings_in, filings_us, news
-from src.analysis import valuation, materiality, rerating, ai_valuation, news_rerate
+from src.data import prices, filings_in, filings_us, news, sector_news
+from src.analysis import valuation, materiality, rerating, ai_valuation, news_rerate, sector_impact
 from src.notify import telegram
 
 ROOT = Path(__file__).parent.parent
@@ -20,9 +20,46 @@ def load_config():
         wl = yaml.safe_load(f)
     return pf["positions"], wl["candidates"]
 
+def _auto_tag_sectors(positions, watchlist):
+    """Fill missing sector/industry from yfinance. Returns True if YAML was updated."""
+    import yfinance as yf
+    pf_file  = ROOT / "config" / "portfolio.yaml"
+    wl_file  = ROOT / "config" / "watchlist.yaml"
+    changed  = False
+
+    def tag(entry):
+        nonlocal changed
+        if entry.get("sector"):
+            return
+        sym = f"{entry['ticker']}.NS" if entry["market"] == "IN" else entry["ticker"]
+        try:
+            info = yf.Ticker(sym).info
+            entry["sector"]   = info.get("sector",   "Unknown")
+            entry["industry"] = info.get("industry", "Unknown")
+            changed = True
+            print(f"  Tagged {entry['ticker']}: {entry['sector']} / {entry['industry']}")
+        except Exception:
+            entry["sector"] = "Unknown"
+            entry["industry"] = "Unknown"
+
+    for p in positions:
+        tag(p)
+    for w in watchlist:
+        tag(w)
+
+    if changed:
+        with open(pf_file, "w") as f:
+            yaml.dump({"positions": positions}, f, default_flow_style=False, allow_unicode=True)
+        with open(wl_file, "w") as f:
+            yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
+    return changed
+
+
 def bootstrap():
     db.init()
     positions, watchlist = load_config()
+    _auto_tag_sectors(positions, watchlist)
+    positions, watchlist = load_config()   # reload after potential YAML update
     db.sync_yaml(positions, watchlist)
     print(f"Loaded {len(positions)} positions, {len(watchlist)} watchlist")
 
@@ -236,6 +273,69 @@ def job_daily():
         if v["signal"] in ("BUY", "ACCUMULATE"):
             telegram.alert_opportunity(v)
             db.log_alert(w["ticker"], f"opportunity_{v['signal']}", json.dumps(v))
+
+    # Sector + macro monitoring
+    _run_sector_macro_scan()
+
+
+def _run_sector_macro_scan():
+    """Fetch macro + sector news; run impact analysis on affected holdings."""
+    positions, watchlist = load_config()
+    all_stocks = positions + watchlist
+
+    # Build sector -> stocks map
+    sector_map = {}
+    for s in all_stocks:
+        sec = s.get("sector", "Unknown")
+        if sec and sec != "Unknown":
+            sector_map.setdefault(sec, []).append(s)
+
+    # Unique sectors held
+    held_sectors = list(sector_map.keys())
+
+    # Fetch macro news + sector-specific news
+    macro_items  = sector_news.fetch_macro_news()
+    sector_items = sector_news.fetch_sector_news(held_sectors)
+    all_items    = macro_items + sector_items
+
+    seen = set()
+    for item in all_items:
+        url = item["url"]
+        if url in seen:
+            continue
+        seen.add(url)
+
+        # Classify materiality
+        cls = materiality.classify("MACRO", item["title"])
+        if not cls.get("material"):
+            continue
+
+        # Find stocks affected by this sector/macro news
+        title_lower = item["title"].lower()
+        affected = []
+        for sec, stocks in sector_map.items():
+            if any(kw in title_lower for kw in [sec.lower(), "rate", "inflation",
+                                                 "gdp", "rbi", "fed", "crude", "rupee"]):
+                affected.extend(stocks)
+
+        if not affected:
+            affected = all_stocks  # macro news affects everyone
+
+        # Deduplicate
+        seen_tickers = set()
+        unique_affected = []
+        for s in affected:
+            if s["ticker"] not in seen_tickers:
+                seen_tickers.add(s["ticker"])
+                unique_affected.append(s)
+
+        result = sector_impact.analyze_sector_impact(item["title"], unique_affected[:8])
+        if "error" not in result:
+            telegram.alert_sector_impact(item["title"], result)
+            db.log_alert("MACRO", "sector_impact", json.dumps({
+                "title": item["title"], "result": result
+            }))
+
 
 def job_weekly():
     """Sunday digest."""

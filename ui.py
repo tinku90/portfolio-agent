@@ -162,7 +162,8 @@ with tab1:
 
         # ── header row ────────────────────────────────────────────────────────
         h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([2.2, 1, 1.1, 1.1, 1.1, 1.1, 1.1, 0.5])
-        h1.markdown(f"### {p['ticker']}  `{p['market']}`")
+        sector_tag = f"  `{p['sector']}`" if p.get("sector") and p["sector"] != "Unknown" else ""
+        h1.markdown(f"### {p['ticker']}  `{p['market']}`{sector_tag}")
         h2.metric("Qty",            int(p["qty"]))
         h3.metric("Avg Cost",       f"{p['avg_cost']:,.0f}")
         h4.metric("FV (PEG)",       f"{fv:,.0f}"      if fv      else "—")
@@ -375,7 +376,8 @@ with tab2:
 
         # ── header row ────────────────────────────────────────────────────────
         c1,c2,c3,c4,c5,c6,c7,c8 = st.columns([2.2,1,1.1,1.1,1.1,1.1,1.1,0.5])
-        c1.markdown(f"### {w['ticker']}  `{w['market']}`")
+        w_sector_tag = f"  `{w['sector']}`" if w.get("sector") and w["sector"] != "Unknown" else ""
+        c1.markdown(f"### {w['ticker']}  `{w['market']}`{w_sector_tag}")
         c2.metric("Growth est.",  f"{w['expected_growth']}%")
         c3.metric("FV (PEG)",     f"{wfv:,.0f}"    if wfv    else "—")
         c4.metric("FV (DCF)",     f"{wdcf:,.0f}"   if wdcf   else "—")
