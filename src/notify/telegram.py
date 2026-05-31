@@ -4,6 +4,19 @@ import requests
 BOT = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
+
+def _num(value, spec=",.0f", na="N/A"):
+    """
+    Safely format a number. Returns `na` when value is None (the LLM could not
+    estimate it) instead of crashing on None.__format__.
+    """
+    if value is None:
+        return na
+    try:
+        return format(value, spec)
+    except (TypeError, ValueError):
+        return str(value)
+
 def send(text: str, parse_mode: str = "Markdown"):
     if not BOT or not CHAT:
         print(f"[TELEGRAM DISABLED] {text}")
@@ -115,14 +128,17 @@ def alert_news_rerate(ticker, market, news_title, r):
     send(msg)
 
 def alert_watchlist_analysis(ticker, market, current_price, result):
+    mos = result.get("suggested_mos_pct") or 0.2
     msg  = f"*WATCHLIST ANALYSIS: {ticker}* ({market})\n\n"
-    msg += f"*Current Price:* `{current_price:,.2f}`\n"
-    msg += f"*Expected Growth:* `{result.get('expected_growth_pct', 0)}%`\n\n"
+    msg += f"*Current Price:* `{_num(current_price, ',.2f')}`\n"
+    msg += f"*Expected Growth:* `{result.get('expected_growth_pct') or 'N/A'}%`\n\n"
     msg += f"*Valuation:*\n"
-    msg += f"PEG — FV: `{result.get('peg_fair_value',0):,.0f}` | Target: `{result.get('peg_target_12m',0):,.0f}`\n"
-    msg += f"DCF — FV: `{result.get('dcf_fair_value',0):,.0f}` | Target: `{result.get('dcf_target_12m',0):,.0f}`\n"
-    msg += f"*Entry price ({int(result.get('suggested_mos_pct',0.2)*100)}% MOS):* `{result.get('entry_price',0):,.0f}`\n"
-    msg += f"*Max PEG to pay:* `{result.get('suggested_peg_threshold',1.0)}`\n\n"
+    msg += f"PEG - FV: `{_num(result.get('peg_fair_value'))}` | Target: `{_num(result.get('peg_target_12m'))}`\n"
+    msg += f"DCF - FV: `{_num(result.get('dcf_fair_value'))}` | Target: `{_num(result.get('dcf_target_12m'))}`\n"
+    msg += f"*Entry price ({int(mos*100)}% MOS):* `{_num(result.get('entry_price'))}`\n"
+    msg += f"*Max PEG to pay:* `{result.get('suggested_peg_threshold') or 'N/A'}`\n\n"
+    if result.get("data_confidence"):
+        msg += f"_Data confidence: {result['data_confidence']}_\n\n"
     msg += f"_{result.get('thesis', '')}_\n\n"
     if result.get("risks"):
         msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"
@@ -132,9 +148,9 @@ def alert_watchlist_analysis(ticker, market, current_price, result):
 
 def alert_annual_report_analysis(ticker, market, result):
     msg  = f"*ANNUAL REPORT ANALYSIS: {ticker}* ({market})\n\n"
-    msg += f"*PEG* — FV: `{result.get('peg_fair_value')}` | Target: `{result.get('peg_target_12m')}`\n"
-    msg += f"*DCF* — FV: `{result.get('dcf_fair_value')}` | Target: `{result.get('dcf_target_12m')}`\n"
-    msg += f"*Stop Loss:* `{result.get('stop_loss')}`\n\n"
+    msg += f"*PEG* - FV: `{_num(result.get('peg_fair_value'))}` | Target: `{_num(result.get('peg_target_12m'))}`\n"
+    msg += f"*DCF* - FV: `{_num(result.get('dcf_fair_value'))}` | Target: `{_num(result.get('dcf_target_12m'))}`\n"
+    msg += f"*Stop Loss:* `{_num(result.get('stop_loss'))}`\n\n"
     msg += f"_{result.get('thesis', '')}_\n\n"
     if result.get("risks"):
         msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"

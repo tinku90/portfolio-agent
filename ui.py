@@ -20,6 +20,15 @@ from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl
 from src.analysis.llm_client import complete_vision
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
 
+def _num(value, spec=",.0f", na="N/A"):
+    """Safe number format — returns na when value is None (LLM could not estimate)."""
+    if value is None:
+        return na
+    try:
+        return format(value, spec)
+    except (TypeError, ValueError):
+        return str(value)
+
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
 st.set_page_config(page_title="Portfolio Agent", page_icon="📈", layout="wide")
@@ -78,9 +87,9 @@ def extract_text(uploaded_file) -> str:
 def send_analysis_to_telegram(ticker, market, avg_cost, result):
     msg  = f"*AI Valuation: {ticker}* ({market})\n\n"
     msg += f"*Avg Cost:* `{avg_cost:,.2f}`\n"
-    msg += f"*PEG* — FV: `{result.get('peg_fair_value',0):,.0f}` | Target: `{result.get('peg_target_12m',0):,.0f}`\n"
-    msg += f"*DCF* — FV: `{result.get('dcf_fair_value',0):,.0f}` | Target: `{result.get('dcf_target_12m',0):,.0f}`\n"
-    msg += f"*Stop Loss:* `{result.get('stop_loss',0):,.0f}`\n\n"
+    msg += f"*PEG* — FV: `{_num(result.get('peg_fair_value'))}` | Target: `{_num(result.get('peg_target_12m'))}`\n"
+    msg += f"*DCF* — FV: `{_num(result.get('dcf_fair_value'))}` | Target: `{_num(result.get('dcf_target_12m'))}`\n"
+    msg += f"*Stop Loss:* `{_num(result.get('stop_loss'))}`\n\n"
     msg += f"_{result.get('thesis', '')}_\n\n"
     if result.get("risks"):
         msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"
@@ -215,11 +224,11 @@ with tab1:
 
                     st.success("✅ Analysis complete — sent to Telegram!")
                     v1, v2, v3, v4, v5 = st.columns(5)
-                    v1.metric("FV — PEG",      f"{result.get('peg_fair_value',0):,.0f}")
-                    v2.metric("Target — PEG",  f"{result.get('peg_target_12m',0):,.0f}")
-                    v3.metric("FV — DCF",      f"{result.get('dcf_fair_value',0):,.0f}")
-                    v4.metric("Target — DCF",  f"{result.get('dcf_target_12m',0):,.0f}")
-                    v5.metric("Stop Loss",     f"{result.get('stop_loss',0):,.0f}")
+                    v1.metric("FV — PEG",      f"{_num(result.get('peg_fair_value'))}")
+                    v2.metric("Target — PEG",  f"{_num(result.get('peg_target_12m'))}")
+                    v3.metric("FV — DCF",      f"{_num(result.get('dcf_fair_value'))}")
+                    v4.metric("Target — DCF",  f"{_num(result.get('dcf_target_12m'))}")
+                    v5.metric("Stop Loss",     f"{_num(result.get('stop_loss'))}")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
                     st.caption(f"*Valuation basis: {result.get('valuation_basis','')}*")
                     col_risk, col_opp = st.columns(2)
@@ -298,11 +307,11 @@ with tab1:
                     send_analysis_to_telegram(new_ticker, new_market, new_avg_cost, result)
                     st.success(f"✅ {new_ticker} added with AI valuation — sent to Telegram!")
                     r1, r2, r3, r4, r5 = st.columns(5)
-                    r1.metric("FV — PEG",     f"{result.get('peg_fair_value',0):,.0f}")
-                    r2.metric("Target — PEG", f"{result.get('peg_target_12m',0):,.0f}")
-                    r3.metric("FV — DCF",     f"{result.get('dcf_fair_value',0):,.0f}")
-                    r4.metric("Target — DCF", f"{result.get('dcf_target_12m',0):,.0f}")
-                    r5.metric("Stop Loss",    f"{result.get('stop_loss',0):,.0f}")
+                    r1.metric("FV — PEG",     f"{_num(result.get('peg_fair_value'))}")
+                    r2.metric("Target — PEG", f"{_num(result.get('peg_target_12m'))}")
+                    r3.metric("FV — DCF",     f"{_num(result.get('dcf_fair_value'))}")
+                    r4.metric("Target — DCF", f"{_num(result.get('dcf_target_12m'))}")
+                    r5.metric("Stop Loss",    f"{_num(result.get('stop_loss'))}")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
                     st.rerun()
                 else:
@@ -439,9 +448,9 @@ with tab2:
                     st.success("✅ Analysis complete — sent to Telegram!")
                     m1,m2,m3,m4,m5,m6 = st.columns(6)
                     m1.metric("Growth",      f"{result.get('expected_growth_pct',0)}%")
-                    m2.metric("FV (PEG)",    f"{result.get('peg_fair_value',0):,.0f}")
-                    m3.metric("FV (DCF)",    f"{result.get('dcf_fair_value',0):,.0f}")
-                    m4.metric("Entry price", f"{result.get('entry_price',0):,.0f}")
+                    m2.metric("FV (PEG)",    f"{_num(result.get('peg_fair_value'))}")
+                    m3.metric("FV (DCF)",    f"{_num(result.get('dcf_fair_value'))}")
+                    m4.metric("Entry price", f"{_num(result.get('entry_price'))}")
                     m5.metric("Max PEG",     result.get("suggested_peg_threshold",1.0))
                     m6.metric("Min MOS",     f"{int(result.get('suggested_mos_pct',0.2)*100)}%")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
@@ -520,9 +529,9 @@ with tab2:
                     st.success(f"✅ {wl_ticker} added with AI valuation — sent to Telegram!")
                     r1,r2,r3,r4,r5,r6 = st.columns(6)
                     r1.metric("Growth",      f"{result.get('expected_growth_pct',0)}%")
-                    r2.metric("FV (PEG)",    f"{result.get('peg_fair_value',0):,.0f}")
-                    r3.metric("FV (DCF)",    f"{result.get('dcf_fair_value',0):,.0f}")
-                    r4.metric("Entry price", f"{result.get('entry_price',0):,.0f}")
+                    r2.metric("FV (PEG)",    f"{_num(result.get('peg_fair_value'))}")
+                    r3.metric("FV (DCF)",    f"{_num(result.get('dcf_fair_value'))}")
+                    r4.metric("Entry price", f"{_num(result.get('entry_price'))}")
                     r5.metric("Max PEG",     result.get("suggested_peg_threshold",1.0))
                     r6.metric("Min MOS",     f"{int(result.get('suggested_mos_pct',0.2)*100)}%")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
