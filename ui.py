@@ -16,6 +16,7 @@ from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
 from src.analysis.ai_valuation import analyze_position as _analyze
+from src.notify.telegram import send as tg_send
 
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
@@ -84,6 +85,19 @@ def extract_text(uploaded_file) -> str:
     except Exception as e:
         return f"[Read failed: {e}]"
 
+def send_analysis_to_telegram(ticker, market, avg_cost, result):
+    msg  = f"*AI Valuation: {ticker}* ({market})\n\n"
+    msg += f"*Avg Cost:* `{avg_cost:,.2f}`\n"
+    msg += f"*PEG* — FV: `{result.get('peg_fair_value',0):,.0f}` | Target: `{result.get('peg_target_12m',0):,.0f}`\n"
+    msg += f"*DCF* — FV: `{result.get('dcf_fair_value',0):,.0f}` | Target: `{result.get('dcf_target_12m',0):,.0f}`\n"
+    msg += f"*Stop Loss:* `{result.get('stop_loss',0):,.0f}`\n\n"
+    msg += f"_{result.get('thesis', '')}_\n\n"
+    if result.get("risks"):
+        msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"
+    if result.get("opportunities"):
+        msg += "*Opportunities:*\n" + "".join(f"🚀 {o}\n" for o in result["opportunities"][:3])
+    tg_send(msg)
+
 def run_analysis(ticker, market, avg_cost, news_items, uploaded_texts) -> dict:
     price_data    = get_price(ticker, market)
     current_price = price_data.get("price", avg_cost) if "error" not in price_data else avg_cost
@@ -123,6 +137,15 @@ with tab1:
         if h8.button("🗑️", key=f"del_{i}", help=f"Remove {p['ticker']}"):
             save([x for x in positions if x["ticker"] != p["ticker"]], watchlist)
             st.rerun()
+
+        if fv and st.button(f"📤 Send {p['ticker']} to Telegram", key=f"tg_{i}"):
+            send_analysis_to_telegram(p["ticker"], p["market"], p["avg_cost"], {
+                "peg_fair_value": fv, "peg_target_12m": tgt,
+                "dcf_fair_value": dcf_fv, "dcf_target_12m": dcf_tgt,
+                "stop_loss": sl, "thesis": p.get("thesis",""),
+                "risks": p.get("risks",[]), "opportunities": p.get("opportunities",[]),
+            })
+            st.success(f"Sent {p['ticker']} to Telegram!")
 
         thesis = p.get("thesis", "")
         if thesis and thesis != "Pending analysis":
@@ -197,8 +220,9 @@ with tab1:
                         opportunities = result.get("opportunities",   []),
                     )
                     save(positions, watchlist)
+                    send_analysis_to_telegram(p["ticker"], p["market"], p["avg_cost"], result)
 
-                    st.success("✅ Analysis complete — position updated!")
+                    st.success("✅ Analysis complete — sent to Telegram!")
                     v1, v2, v3, v4, v5 = st.columns(5)
                     v1.metric("FV — PEG",      f"{result.get('peg_fair_value',0):,.0f}")
                     v2.metric("Target — PEG",  f"{result.get('peg_target_12m',0):,.0f}")
@@ -280,7 +304,8 @@ with tab1:
                     )
                     positions.append(new_pos)
                     save(positions, watchlist)
-                    st.success(f"✅ {new_ticker} added with AI valuation!")
+                    send_analysis_to_telegram(new_ticker, new_market, new_avg_cost, result)
+                    st.success(f"✅ {new_ticker} added with AI valuation — sent to Telegram!")
                     r1, r2, r3, r4, r5 = st.columns(5)
                     r1.metric("FV — PEG",     f"{result.get('peg_fair_value',0):,.0f}")
                     r2.metric("Target — PEG", f"{result.get('peg_target_12m',0):,.0f}")
