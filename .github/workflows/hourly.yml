@@ -1,7 +1,7 @@
 name: hourly
 on:
   schedule:
-    - cron: "*/30 4-11 * * 1-5"
+    - cron: "*/15 4-11 * * 1-5"
   workflow_dispatch:
 jobs:
   run:

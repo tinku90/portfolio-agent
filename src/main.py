@@ -27,7 +27,7 @@ def bootstrap():
     print(f"Loaded {len(positions)} positions, {len(watchlist)} watchlist")
 
 def job_hourly():
-    """Prices + filings scan for held + watchlist tickers."""
+    """Prices + filings + news scan every 15 min during market hours."""
     bootstrap()
     all_tickers = db.all_positions() + db.all_watchlist()
 
@@ -77,6 +77,25 @@ def job_hourly():
             else:
                 telegram.alert_filing(f)
             db.mark_processed(fid)
+
+    # 3. News scan (deduplicated — Groq only called on headlines not seen before)
+    for stock in all_tickers:
+        try:
+            items = news.fetch_news(stock["ticker"], stock["market"], stock.get("thesis", "")[:50])
+        except Exception as e:
+            print(f"News fetch failed {stock['ticker']}: {e}")
+            continue
+        for n in items:
+            nid = db.save_news(stock["ticker"], n["title"], n["url"], n["published"])
+            if not nid:
+                continue  # already seen — skip Groq call
+            cls = materiality.classify(stock["ticker"], n["title"])
+            summary = None
+            if cls["material"]:
+                summary = materiality.summarize(stock["ticker"], n["title"], stock.get("thesis", ""))
+                telegram.alert_filing({"ticker": stock["ticker"], "source": "News", "title": n["title"], "url": n["url"]}, summary=summary)
+                db.log_alert(stock["ticker"], "news_material", json.dumps({"title": n["title"], "summary": summary}))
+            db.update_news_materiality(nid, cls["material"], summary)
 
 def job_daily():
     """News scan + opportunity scan."""
