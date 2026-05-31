@@ -63,6 +63,22 @@ def alert_news_rerate(ticker, market, news_title, r):
     msg += f"*Action:* {r.get('action', '')}"
     send(msg)
 
+def alert_watchlist_analysis(ticker, market, current_price, result):
+    msg  = f"*WATCHLIST ANALYSIS: {ticker}* ({market})\n\n"
+    msg += f"*Current Price:* `{current_price:,.2f}`\n"
+    msg += f"*Expected Growth:* `{result.get('expected_growth_pct', 0)}%`\n\n"
+    msg += f"*Valuation:*\n"
+    msg += f"PEG — FV: `{result.get('peg_fair_value',0):,.0f}` | Target: `{result.get('peg_target_12m',0):,.0f}`\n"
+    msg += f"DCF — FV: `{result.get('dcf_fair_value',0):,.0f}` | Target: `{result.get('dcf_target_12m',0):,.0f}`\n"
+    msg += f"*Entry price ({int(result.get('suggested_mos_pct',0.2)*100)}% MOS):* `{result.get('entry_price',0):,.0f}`\n"
+    msg += f"*Max PEG to pay:* `{result.get('suggested_peg_threshold',1.0)}`\n\n"
+    msg += f"_{result.get('thesis', '')}_\n\n"
+    if result.get("risks"):
+        msg += "*Risks:*\n" + "".join(f"⚠️ {r}\n" for r in result["risks"][:3]) + "\n"
+    if result.get("opportunities"):
+        msg += "*Opportunities:*\n" + "".join(f"🚀 {o}\n" for o in result["opportunities"][:3])
+    send(msg)
+
 def alert_annual_report_analysis(ticker, market, result):
     msg  = f"*ANNUAL REPORT ANALYSIS: {ticker}* ({market})\n\n"
     msg += f"*PEG* — FV: `{result.get('peg_fair_value')}` | Target: `{result.get('peg_target_12m')}`\n"

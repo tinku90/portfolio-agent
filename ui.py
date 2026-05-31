@@ -15,8 +15,8 @@ import docx
 from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
-from src.analysis.ai_valuation import analyze_position as _analyze
-from src.notify.telegram import send as tg_send
+from src.analysis.ai_valuation import analyze_position as _analyze, analyze_watchlist as _analyze_wl
+from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
 
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
@@ -332,19 +332,51 @@ with tab2:
     st.subheader(f"Watchlist · {len(watchlist)} candidates")
 
     for i, w in enumerate(watchlist):
-        w1, w2, w3, w4, w5 = st.columns([2.5, 1.2, 1.2, 1.2, 0.6])
-        w1.markdown(f"### {w['ticker']}  `{w['market']}`")
-        w2.metric("Expected Growth", f"{w['expected_growth']}%")
-        w3.metric("Max PEG",         w["peg_threshold"])
-        w4.metric("Min MOS",         f"{int(w['mos_pct']*100)}%")
-        if w5.button("🗑️", key=f"del_wl_{i}", help=f"Remove {w['ticker']}"):
+        wfv     = w.get("fair_value", 0)      or 0
+        wdcf    = w.get("dcf_fair_value", 0)  or 0
+        wtgt    = w.get("peg_target", 0)       or 0
+        wdtgt   = w.get("dcf_target", 0)      or 0
+        wentry  = w.get("entry_price", 0)      or 0
+
+        # ── header row ────────────────────────────────────────────────────────
+        c1,c2,c3,c4,c5,c6,c7,c8 = st.columns([2.2,1,1.1,1.1,1.1,1.1,1.1,0.5])
+        c1.markdown(f"### {w['ticker']}  `{w['market']}`")
+        c2.metric("Growth est.",  f"{w['expected_growth']}%")
+        c3.metric("FV (PEG)",     f"{wfv:,.0f}"    if wfv    else "—")
+        c4.metric("FV (DCF)",     f"{wdcf:,.0f}"   if wdcf   else "—")
+        c5.metric("Entry price",  f"{wentry:,.0f}" if wentry else "—")
+        c6.metric("Max PEG",      w["peg_threshold"])
+        c7.metric("Min MOS",      f"{int(w['mos_pct']*100)}%")
+        if c8.button("🗑️", key=f"del_wl_{i}", help=f"Remove {w['ticker']}"):
             save(positions, [x for x in watchlist if x["ticker"] != w["ticker"]])
             st.rerun()
 
-        if w.get("thesis"):
+        if w.get("thesis") and w["thesis"] != "Pending analysis":
             st.caption(f"**Thesis:** {w['thesis']}")
+        if w.get("risks"):
+            st.caption("**Risks:** " + "  ·  ".join(f"⚠️ {r}" for r in w["risks"]))
+        if w.get("opportunities"):
+            st.caption("**Opportunities:** " + "  ·  ".join(f"🚀 {o}" for o in w["opportunities"]))
 
-        with st.expander("✏️  Edit"):
+        if wfv and st.button(f"📤 Send {w['ticker']} to Telegram", key=f"tg_wl_{i}"):
+            price_data = get_price(w["ticker"], w["market"])
+            cp = price_data.get("price", 0) if "error" not in price_data else 0
+            tg_wl(w["ticker"], w["market"], cp, {
+                "expected_growth_pct":    w.get("expected_growth", 0),
+                "peg_fair_value":         wfv,   "peg_target_12m":  wtgt,
+                "dcf_fair_value":         wdcf,  "dcf_target_12m":  wdtgt,
+                "suggested_peg_threshold":w.get("peg_threshold", 1.0),
+                "suggested_mos_pct":      w.get("mos_pct", 0.2),
+                "entry_price":            wentry,
+                "thesis":                 w.get("thesis", ""),
+                "risks":                  w.get("risks", []),
+                "opportunities":          w.get("opportunities", []),
+            })
+            st.success(f"Sent {w['ticker']} to Telegram!")
+
+        # ── edit expander ─────────────────────────────────────────────────────
+        with st.expander("✏️  Edit — manual override"):
+            st.caption("AI Analysis sets these automatically. Edit only to override.")
             with st.form(f"edit_wl_{i}"):
                 we1, we2, we3 = st.columns(3)
                 ng = we1.number_input("Expected Growth %", value=float(w["expected_growth"]), min_value=1.0, step=1.0)
@@ -357,33 +389,159 @@ with tab2:
                     st.success("Saved!")
                     st.rerun()
 
+        # ── AI analysis expander ───────────────────────────────────────────────
+        with st.expander("🤖  AI Analysis — upload transcripts & annual report"):
+            st.markdown("#### Recent news")
+            with st.spinner("Fetching…"):
+                try:
+                    wl_news = fetch_news(w["ticker"], w["market"], "")
+                    for n in wl_news[:5]:
+                        st.markdown(f"- [{n['title'][:100]}]({n['url']})")
+                except Exception:
+                    wl_news = []
+
+            st.markdown("---")
+            st.caption("Accepted: PDF, Word, TXT, JPG/PNG, XLS/XLSX, CSV")
+            wl_uploads = st.file_uploader(
+                "Drop files here",
+                accept_multiple_files=True,
+                type=["pdf","txt","jpg","jpeg","png","xls","xlsx","csv","doc","docx"],
+                key=f"wl_up_{w['ticker']}",
+            )
+            wl_raw = st.text_area(
+                "Or paste text",
+                height=120,
+                key=f"wl_raw_{w['ticker']}",
+                placeholder="Paste concall transcript, annual report excerpt…",
+            )
+
+            if st.button("▶  Run AI Analysis", key=f"wl_run_{i}", type="primary"):
+                docs = [(uf.name, extract_text(uf)) for uf in (wl_uploads or [])]
+                if (wl_raw or "").strip():
+                    docs.append(("pasted_text", wl_raw.strip()))
+                price_data    = get_price(w["ticker"], w["market"])
+                current_price = price_data.get("price", 0) if "error" not in price_data else 0
+                currency      = price_data.get("currency", "INR" if w["market"] == "IN" else "USD")
+                with st.spinner("Analysing with Groq LLM…"):
+                    result = _analyze_wl(w["ticker"], w["market"], current_price, currency, wl_news, docs or None)
+
+                if "error" in result:
+                    st.error(f"Analysis failed: {result['error']}")
+                else:
+                    watchlist[i].update(
+                        expected_growth = result.get("expected_growth_pct",    w["expected_growth"]),
+                        peg_threshold   = result.get("suggested_peg_threshold",w["peg_threshold"]),
+                        mos_pct         = result.get("suggested_mos_pct",      w["mos_pct"]),
+                        fair_value      = result.get("peg_fair_value",         0),
+                        peg_target      = result.get("peg_target_12m",         0),
+                        dcf_fair_value  = result.get("dcf_fair_value",         0),
+                        dcf_target      = result.get("dcf_target_12m",         0),
+                        entry_price     = result.get("entry_price",            0),
+                        thesis          = result.get("thesis",                 w.get("thesis","")),
+                        risks           = result.get("risks",                  []),
+                        opportunities   = result.get("opportunities",          []),
+                    )
+                    save(positions, watchlist)
+                    tg_wl(w["ticker"], w["market"], current_price, result)
+
+                    st.success("✅ Analysis complete — sent to Telegram!")
+                    m1,m2,m3,m4,m5,m6 = st.columns(6)
+                    m1.metric("Growth",      f"{result.get('expected_growth_pct',0)}%")
+                    m2.metric("FV (PEG)",    f"{result.get('peg_fair_value',0):,.0f}")
+                    m3.metric("FV (DCF)",    f"{result.get('dcf_fair_value',0):,.0f}")
+                    m4.metric("Entry price", f"{result.get('entry_price',0):,.0f}")
+                    m5.metric("Max PEG",     result.get("suggested_peg_threshold",1.0))
+                    m6.metric("Min MOS",     f"{int(result.get('suggested_mos_pct',0.2)*100)}%")
+                    st.markdown(f"**Thesis:** {result.get('thesis','')}")
+                    st.caption(f"*{result.get('valuation_basis','')}*")
+                    col_r, col_o = st.columns(2)
+                    if result.get("risks"):
+                        with col_r:
+                            st.markdown("**⚠️ Risks**")
+                            for r in result["risks"]: st.markdown(f"- {r}")
+                    if result.get("opportunities"):
+                        with col_o:
+                            st.markdown("**🚀 Opportunities**")
+                            for o in result["opportunities"]: st.markdown(f"- {o}")
+                    st.rerun()
+
         st.divider()
 
+    # ── add to watchlist ──────────────────────────────────────────────────────
     st.subheader("➕  Add to Watchlist")
-    with st.form("add_wl", clear_on_submit=True):
-        b1, b2 = st.columns(2)
-        wl_ticker = b1.text_input("Ticker *", placeholder="TATAMOTORS / GOOGL").upper().strip()
-        wl_market = b2.selectbox("Market *", ["IN", "US"])
-        b3, b4, b5 = st.columns(3)
-        wl_growth = b3.number_input("Expected Growth % *", min_value=1.0, max_value=200.0, value=20.0, step=1.0,
-                                     help="Annual earnings growth you expect")
-        wl_peg    = b4.number_input("Max PEG you'd pay *",  min_value=0.1, max_value=5.0,  value=1.0,  step=0.1,
-                                     help="PEG below this = attractive")
-        wl_mos    = b5.number_input("Min Margin of Safety %*", min_value=5, max_value=60, value=20, step=5,
-                                     help="Discount to fair value needed before you buy") / 100
-        wl_thesis = st.text_area("Why are you watching this? *", placeholder="EV transition play, cheap PEG…", height=68)
+    st.caption("Upload documents for instant AI valuation, or leave blank to analyze later.")
 
-        if st.form_submit_button("Add to Watchlist", type="primary"):
-            if not wl_ticker or not wl_thesis:
-                st.error("Ticker and thesis are required.")
-            elif any(x["ticker"] == wl_ticker for x in watchlist):
-                st.error(f"{wl_ticker} already in watchlist.")
+    b1, b2 = st.columns(2)
+    wl_ticker = b1.text_input("Ticker *", placeholder="TATAMOTORS / GOOGL", key="wl_ticker").upper().strip()
+    wl_market = b2.selectbox("Market *", ["IN", "US"], key="wl_market")
+
+    wl_uploads = st.file_uploader(
+        "Documents for instant valuation *(optional)*",
+        accept_multiple_files=True,
+        type=["pdf","txt","jpg","jpeg","png","xls","xlsx","csv","doc","docx"],
+        key="wl_add_uploads",
+    )
+    wl_raw_text = st.text_area(
+        "Or paste text",
+        height=100, key="wl_add_raw",
+        placeholder="Paste annual report excerpt, concall transcript…",
+    )
+
+    if st.button("Add to Watchlist", type="primary", key="wl_add_btn"):
+        if not wl_ticker:
+            st.error("Ticker is required.")
+        elif any(x["ticker"] == wl_ticker for x in watchlist):
+            st.error(f"{wl_ticker} already in watchlist.")
+        else:
+            new_wl = {
+                "ticker": wl_ticker, "market": wl_market,
+                "expected_growth": 20.0, "peg_threshold": 1.0,
+                "mos_pct": 0.20, "thesis": "Pending analysis",
+            }
+            has_docs = bool(wl_uploads or (wl_raw_text or "").strip())
+            if has_docs:
+                docs = [(uf.name, extract_text(uf)) for uf in (wl_uploads or [])]
+                if (wl_raw_text or "").strip():
+                    docs.append(("pasted_text", wl_raw_text.strip()))
+                price_data    = get_price(wl_ticker, wl_market)
+                current_price = price_data.get("price", 0) if "error" not in price_data else 0
+                currency      = price_data.get("currency", "INR" if wl_market == "IN" else "USD")
+                with st.spinner(f"Analysing {wl_ticker}…"):
+                    result = _analyze_wl(wl_ticker, wl_market, current_price, currency, [], docs)
+                if "error" not in result:
+                    new_wl.update(
+                        expected_growth = result.get("expected_growth_pct",    20.0),
+                        peg_threshold   = result.get("suggested_peg_threshold",1.0),
+                        mos_pct         = result.get("suggested_mos_pct",      0.20),
+                        fair_value      = result.get("peg_fair_value",         0),
+                        peg_target      = result.get("peg_target_12m",         0),
+                        dcf_fair_value  = result.get("dcf_fair_value",         0),
+                        dcf_target      = result.get("dcf_target_12m",         0),
+                        entry_price     = result.get("entry_price",            0),
+                        thesis          = result.get("thesis",                 ""),
+                        risks           = result.get("risks",                  []),
+                        opportunities   = result.get("opportunities",          []),
+                    )
+                    watchlist.append(new_wl)
+                    save(positions, watchlist)
+                    tg_wl(wl_ticker, wl_market, current_price, result)
+                    st.success(f"✅ {wl_ticker} added with AI valuation — sent to Telegram!")
+                    r1,r2,r3,r4,r5,r6 = st.columns(6)
+                    r1.metric("Growth",      f"{result.get('expected_growth_pct',0)}%")
+                    r2.metric("FV (PEG)",    f"{result.get('peg_fair_value',0):,.0f}")
+                    r3.metric("FV (DCF)",    f"{result.get('dcf_fair_value',0):,.0f}")
+                    r4.metric("Entry price", f"{result.get('entry_price',0):,.0f}")
+                    r5.metric("Max PEG",     result.get("suggested_peg_threshold",1.0))
+                    r6.metric("Min MOS",     f"{int(result.get('suggested_mos_pct',0.2)*100)}%")
+                    st.markdown(f"**Thesis:** {result.get('thesis','')}")
+                    st.rerun()
+                else:
+                    st.warning(f"Analysis failed ({result['error']}), stock added without valuation.")
+                    watchlist.append(new_wl)
+                    save(positions, watchlist)
+                    st.rerun()
             else:
-                watchlist.append({
-                    "ticker": wl_ticker, "market": wl_market,
-                    "expected_growth": float(wl_growth), "peg_threshold": float(wl_peg),
-                    "mos_pct": float(wl_mos), "thesis": wl_thesis,
-                })
+                watchlist.append(new_wl)
                 save(positions, watchlist)
-                st.success(f"✅ {wl_ticker} added to watchlist!")
+                st.success(f"✅ {wl_ticker} added. Open **AI Analysis** to calculate fair value.")
                 st.rerun()
