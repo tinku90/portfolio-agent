@@ -63,7 +63,8 @@ Your tasks:
 3. Set an absolute stop-loss price level (not a %).
 4. Write a concise 2-3 sentence investment thesis.
 5. List 3-5 key risk factors specific to this stock.
-6. Briefly explain your valuation methodology in one sentence.
+6. List 3-5 growth opportunities or upcoming catalysts for this stock.
+7. Briefly explain your valuation methodology in one sentence.
 
 Return ONLY valid JSON:
 {{
@@ -72,6 +73,7 @@ Return ONLY valid JSON:
   "stop_loss": <number>,
   "thesis": "...",
   "risks": ["...", "...", "..."],
+  "opportunities": ["...", "...", "..."],
   "valuation_basis": "..."
 }}"""
 
@@ -141,6 +143,9 @@ with tab1:
         risks = p.get("risks", [])
         if risks:
             st.caption("**Risks:** " + "  ·  ".join(f"⚠️ {r}" for r in risks))
+        opportunities = p.get("opportunities", [])
+        if opportunities:
+            st.caption("**Opportunities:** " + "  ·  ".join(f"🚀 {o}" for o in opportunities))
 
         # ── edit expander ─────────────────────────────────────────────────────
         with st.expander("✏️  Edit position"):
@@ -190,11 +195,12 @@ with tab1:
                     st.error(f"Analysis failed: {result['error']}")
                 else:
                     positions[i].update(
-                        fair_value = result.get("fair_value", fv),
-                        target     = result.get("target_12m", tgt),
-                        stop_loss  = result.get("stop_loss",  sl),
-                        thesis     = result.get("thesis",     thesis),
-                        risks      = result.get("risks",      []),
+                        fair_value    = result.get("fair_value",    fv),
+                        target        = result.get("target_12m",    tgt),
+                        stop_loss     = result.get("stop_loss",     sl),
+                        thesis        = result.get("thesis",        thesis),
+                        risks         = result.get("risks",         []),
+                        opportunities = result.get("opportunities", []),
                     )
                     save(positions, watchlist)
 
@@ -205,10 +211,17 @@ with tab1:
                     r3.metric("Stop Loss",     f"{result['stop_loss']:,.0f}")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
                     st.markdown(f"**Valuation basis:** {result.get('valuation_basis','')}")
+                    col_risk, col_opp = st.columns(2)
                     if result.get("risks"):
-                        st.markdown("**Risk factors:**")
-                        for r in result["risks"]:
-                            st.markdown(f"- ⚠️ {r}")
+                        with col_risk:
+                            st.markdown("**⚠️ Risk factors**")
+                            for r in result["risks"]:
+                                st.markdown(f"- {r}")
+                    if result.get("opportunities"):
+                        with col_opp:
+                            st.markdown("**🚀 Growth opportunities**")
+                            for o in result["opportunities"]:
+                                st.markdown(f"- {o}")
                     st.rerun()
 
         st.divider()
