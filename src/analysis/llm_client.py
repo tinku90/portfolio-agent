@@ -10,15 +10,9 @@ Unified LLM client with:
 import os, json, sys
 from pathlib import Path
 
-# ── Add TokenSaver to path so we can import its zero-cost rule optimizer ──────
-_TS_PATH = Path(__file__).parent.parent.parent / "TokenSaver - Copy"
-if str(_TS_PATH) not in sys.path:
-    sys.path.insert(0, str(_TS_PATH))
-
 try:
-    from rule_optimizer import rule_optimize as _rule_optimize
-    from prompt_cache import cache_get, cache_set, cache_stats as _cache_stats
-    from token_counter import count_tokens as _count_tokens
+    from src.analysis.token_saver import finance_optimize as _optimize, \
+        cache_get, cache_set, cache_stats as _cache_stats, count_tokens as _count_tokens
     _TS_AVAILABLE = True
 except ImportError:
     _TS_AVAILABLE = False
@@ -63,9 +57,7 @@ def _optimize_messages(messages: list) -> tuple[list, dict]:
         stats["original_tokens"] += orig_tokens
 
         try:
-            opt_content = _rule_optimize(content, aggressiveness=_FINANCE_AGGRESSIVENESS)
-            if not isinstance(opt_content, str):
-                opt_content = content
+            opt_content = _optimize(content)
         except Exception:
             opt_content = content  # fall back to original on any error
 
