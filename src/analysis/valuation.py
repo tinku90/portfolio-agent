@@ -119,6 +119,59 @@ def suggested_stop_loss(current_price: float, business_risk: str = "medium") -> 
     return round(current_price * (1 - pct), 2)
 
 
+# ── Unified builder: inputs -> full valuation dict ────────────────────────────
+
+REQUIRED_INPUTS = ["estimated_eps", "estimated_growth_pct"]   # minimum for PEG
+
+
+def build_valuation(market, current_price, avg_cost, inputs: dict) -> dict:
+    """
+    Compute PEG + DCF valuation from a dict of inputs (LLM-estimated or
+    user-supplied). Pure Python — no LLM, no hallucination.
+
+    inputs keys: estimated_eps, estimated_fcf_per_share, estimated_growth_pct,
+                 wacc_pct, terminal_growth_pct, business_risk
+    Returns the valuation dict plus a 'missing_inputs' list naming which
+    required fields are still null (so the UI can prompt for them).
+    """
+    eps    = inputs.get("estimated_eps")
+    fcf    = inputs.get("estimated_fcf_per_share") or eps
+    growth = inputs.get("estimated_growth_pct")
+    risk   = inputs.get("business_risk", "medium")
+    wacc   = inputs.get("wacc_pct") or default_wacc(market, risk)
+    tg     = inputs.get("terminal_growth_pct") or 3.0
+
+    peg_fv  = peg_fair_value(eps, growth)
+    peg_tgt = peg_target(eps, growth) if peg_fv else None
+    dcf_fv  = dcf_fair_value(fcf, growth, wacc, tg) if (fcf and growth) else None
+    dcf_tgt = dcf_target(fcf, growth, wacc, tg)      if dcf_fv        else None
+    sl      = suggested_stop_loss(current_price, risk) if current_price else None
+    best_fv = peg_fv or dcf_fv
+    mos     = margin_of_safety(current_price, best_fv) if best_fv else None
+
+    # Which inputs are still missing (blocking a full valuation)?
+    missing = []
+    if not eps:
+        missing.append("estimated_eps")
+    if not growth:
+        missing.append("estimated_growth_pct")
+    if not fcf:
+        missing.append("estimated_fcf_per_share")
+
+    return {
+        "peg_fair_value": peg_fv, "peg_target_12m": peg_tgt,
+        "dcf_fair_value": dcf_fv, "dcf_target_12m": dcf_tgt,
+        "stop_loss": sl, "mos": mos,
+        "missing_inputs": missing,
+        "_inputs": {"eps": eps, "fcf": fcf, "growth": growth,
+                    "wacc": wacc, "tg": tg, "risk": risk},
+        "valuation_basis": (
+            f"PEG: EPS={eps}, g={growth}% -> FV={peg_fv}. "
+            f"DCF: FCF={fcf}, g={growth}%, WACC={wacc}%, TG={tg}% -> FV={dcf_fv}."
+        ),
+    }
+
+
 # ── Legacy helpers (kept for backward compatibility) ──────────────────────────
 
 def fair_value_from_pe(eps: float, fair_pe: float, growth_pct: float) -> float | None:

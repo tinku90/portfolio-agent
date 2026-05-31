@@ -8,10 +8,7 @@ This eliminates hallucinated calculations entirely.
 If LLM cannot estimate an input, it returns null -> Python returns null for that method.
 """
 from src.analysis.llm_client import complete_json
-from src.analysis.valuation import (
-    peg_fair_value, peg_target, dcf_fair_value, dcf_target,
-    margin_of_safety, suggested_stop_loss, default_wacc,
-)
+from src.analysis.valuation import build_valuation
 from src.analysis.token_saver.hallucination_guard import (
     prepare_prompt, validate_financial_response,
 )
@@ -95,54 +92,13 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
     if "error" in inputs:
         return inputs
 
-    # -- Step 2: Python calculates valuations ----------------------------------
-    eps       = inputs.get("estimated_eps")
-    fcf       = inputs.get("estimated_fcf_per_share") or eps   # FCF preferred; fallback to EPS
-    growth    = inputs.get("estimated_growth_pct")
-    wacc      = inputs.get("wacc_pct") or default_wacc(market, inputs.get("business_risk", "medium"))
-    tg        = inputs.get("terminal_growth_pct") or 3.0
-    risk      = inputs.get("business_risk", "medium")
-
-    # PEG calculation (needs EPS + growth)
-    peg_fv  = peg_fair_value(eps, growth)
-    peg_tgt = peg_target(eps, growth) if peg_fv else None
-
-    # DCF calculation (needs FCF/EPS + growth + WACC)
-    dcf_fv  = dcf_fair_value(fcf, growth, wacc, tg) if (fcf and growth) else None
-    dcf_tgt = dcf_target(fcf, growth, wacc, tg)      if dcf_fv        else None
-
-    # Stop loss from risk level (never hallucinated - pure formula)
-    sl = suggested_stop_loss(current_price, risk)
-
-    # MOS
-    best_fv = peg_fv or dcf_fv
-    mos     = margin_of_safety(current_price, best_fv) if best_fv else None
-
-    result = {
-        # Calculated values (Python, no hallucination)
-        "peg_fair_value":  peg_fv,
-        "peg_target_12m":  peg_tgt,
-        "dcf_fair_value":  dcf_fv,
-        "dcf_target_12m":  dcf_tgt,
-        "stop_loss":       sl,
-        "mos":             mos,
-        # LLM narrative (what it's good at)
-        "thesis":          inputs.get("thesis", ""),
-        "risks":           inputs.get("risks", []),
-        "opportunities":   inputs.get("opportunities", []),
-        "data_confidence": inputs.get("data_confidence", "medium"),
-        # Inputs used (full transparency)
-        "_inputs": {
-            "eps":    eps,    "fcf":    fcf,
-            "growth": growth, "wacc":   wacc,
-            "tg":     tg,     "risk":   risk,
-        },
-        "valuation_basis": (
-            f"PEG: EPS={eps}, growth={growth}% -> FV={peg_fv}. "
-            f"DCF: FCF={fcf}, growth={growth}%, WACC={wacc}%, TG={tg}% -> FV={dcf_fv}. "
-            f"Confidence: {inputs.get('data_confidence','medium')}."
-        ),
-    }
+    # -- Step 2: Python calculates valuations (pure math, no hallucination) ----
+    result = build_valuation(market, current_price, avg_cost, inputs)
+    # Attach LLM narrative
+    result["thesis"]          = inputs.get("thesis", "")
+    result["risks"]           = inputs.get("risks", [])
+    result["opportunities"]   = inputs.get("opportunities", [])
+    result["data_confidence"] = inputs.get("data_confidence", "medium")
 
     # -- Step 3: Validate outputs ----------------------------------------------
     validation = validate_financial_response(result, current_price, avg_cost)
@@ -153,4 +109,29 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
     elif validation.warnings:
         result["_validation_warnings"] = validation.warnings
 
+    return result
+
+
+def recompute(market, current_price, avg_cost, inputs: dict, narrative: dict = None) -> dict:
+    """
+    Recompute valuation from user-completed inputs — NO LLM call.
+    Used when the user manually fills inputs the LLM could not estimate.
+
+    inputs: {estimated_eps, estimated_fcf_per_share, estimated_growth_pct,
+             wacc_pct, terminal_growth_pct, business_risk}
+    narrative: optional {thesis, risks, opportunities} to carry over.
+    """
+    result = build_valuation(market, current_price, avg_cost, inputs)
+    narrative = narrative or {}
+    result["thesis"]        = narrative.get("thesis", "")
+    result["risks"]         = narrative.get("risks", [])
+    result["opportunities"] = narrative.get("opportunities", [])
+    result["data_confidence"] = "user-supplied"
+
+    validation = validate_financial_response(result, current_price, avg_cost)
+    if not validation.passed:
+        result["_validation_errors"]   = validation.errors
+        result["_validation_warnings"] = validation.warnings
+    elif validation.warnings:
+        result["_validation_warnings"] = validation.warnings
     return result

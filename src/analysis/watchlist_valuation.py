@@ -8,9 +8,7 @@ Uses the llm_client fallback chain (Groq -> Gemini -> OpenAI), so it
 never dies on a single-provider 429.
 """
 from src.analysis.llm_client import complete_json
-from src.analysis.valuation import (
-    peg_fair_value, peg_target, dcf_fair_value, dcf_target, default_wacc,
-)
+from src.analysis.valuation import build_valuation
 from src.analysis.token_saver.hallucination_guard import (
     prepare_prompt, validate_financial_response,
 )
@@ -77,41 +75,8 @@ def analyze_watchlist(ticker, market, current_price, currency,
     if "error" in inp:
         return inp
 
-    # -- Step 2: Python computes valuations ------------------------------------
-    eps    = inp.get("estimated_eps")
-    fcf    = inp.get("estimated_fcf_per_share") or eps
-    growth = inp.get("estimated_growth_pct")
-    wacc   = inp.get("wacc_pct") or default_wacc(market, inp.get("business_risk", "medium"))
-    tg     = inp.get("terminal_growth_pct") or 3.0
-
-    peg_fv  = peg_fair_value(eps, growth)
-    peg_tgt = peg_target(eps, growth) if peg_fv else None
-    dcf_fv  = dcf_fair_value(fcf, growth, wacc, tg) if (fcf and growth) else None
-    dcf_tgt = dcf_target(fcf, growth, wacc, tg)      if dcf_fv        else None
-
-    mos_pct = inp.get("suggested_mos_pct") or 0.20
-    fvs     = [v for v in (peg_fv, dcf_fv) if v]
-    entry   = round(min(fvs) * (1 - mos_pct), 2) if fvs else None
-
-    result = {
-        "expected_growth_pct":     growth,
-        "peg_fair_value":          peg_fv,
-        "peg_target_12m":          peg_tgt,
-        "dcf_fair_value":          dcf_fv,
-        "dcf_target_12m":          dcf_tgt,
-        "suggested_peg_threshold": inp.get("suggested_peg_threshold", 1.0),
-        "suggested_mos_pct":       mos_pct,
-        "entry_price":             entry,
-        "thesis":                  inp.get("thesis", ""),
-        "risks":                   inp.get("risks", []),
-        "opportunities":           inp.get("opportunities", []),
-        "data_confidence":         inp.get("data_confidence", "medium"),
-        "_inputs": {"eps": eps, "fcf": fcf, "growth": growth, "wacc": wacc, "tg": tg},
-        "valuation_basis": (
-            f"PEG: EPS={eps}, g={growth}% -> FV={peg_fv}. "
-            f"DCF: FCF={fcf}, g={growth}%, WACC={wacc}%, TG={tg}% -> FV={dcf_fv}."
-        ),
-    }
+    # -- Step 2: Python computes valuations (pure math) ------------------------
+    result = _assemble_watchlist(market, current_price, inp)
 
     # -- Step 3: validate ------------------------------------------------------
     validation = validate_financial_response(result, current_price)
@@ -120,4 +85,43 @@ def analyze_watchlist(ticker, market, current_price, currency,
     if validation.warnings:
         result["_validation_warnings"] = validation.warnings
 
+    return result
+
+
+def _assemble_watchlist(market, current_price, inp: dict) -> dict:
+    """Build the watchlist result dict (entry price, thresholds) from inputs."""
+    val     = build_valuation(market, current_price, None, inp)
+    mos_pct = inp.get("suggested_mos_pct") or 0.20
+    fvs     = [v for v in (val["peg_fair_value"], val["dcf_fair_value"]) if v]
+    entry   = round(min(fvs) * (1 - mos_pct), 2) if fvs else None
+    return {
+        "expected_growth_pct":     inp.get("estimated_growth_pct"),
+        "peg_fair_value":          val["peg_fair_value"],
+        "peg_target_12m":          val["peg_target_12m"],
+        "dcf_fair_value":          val["dcf_fair_value"],
+        "dcf_target_12m":          val["dcf_target_12m"],
+        "suggested_peg_threshold": inp.get("suggested_peg_threshold", 1.0),
+        "suggested_mos_pct":       mos_pct,
+        "entry_price":             entry,
+        "thesis":                  inp.get("thesis", ""),
+        "risks":                   inp.get("risks", []),
+        "opportunities":           inp.get("opportunities", []),
+        "data_confidence":         inp.get("data_confidence", "medium"),
+        "missing_inputs":          val["missing_inputs"],
+        "_inputs":                 val["_inputs"],
+        "valuation_basis":         val["valuation_basis"],
+    }
+
+
+def recompute_watchlist(market, current_price, inputs: dict, narrative: dict = None) -> dict:
+    """Recompute watchlist valuation from user-completed inputs — NO LLM call."""
+    narrative = narrative or {}
+    merged = dict(inputs)
+    merged.setdefault("suggested_peg_threshold", narrative.get("suggested_peg_threshold", 1.0))
+    merged.setdefault("suggested_mos_pct",       narrative.get("suggested_mos_pct", 0.20))
+    merged["thesis"]        = narrative.get("thesis", "")
+    merged["risks"]         = narrative.get("risks", [])
+    merged["opportunities"] = narrative.get("opportunities", [])
+    result = _assemble_watchlist(market, current_price, merged)
+    result["data_confidence"] = "user-supplied"
     return result

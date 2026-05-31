@@ -15,8 +15,8 @@ import pdfplumber
 import docx
 from src.data.news import fetch_news
 from src.data.prices import get_price
-from src.analysis.ai_valuation import analyze_position as _analyze
-from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl
+from src.analysis.ai_valuation import analyze_position as _analyze, recompute as _recompute
+from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl, recompute_watchlist as _recompute_wl
 from src.analysis.llm_client import complete_vision
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
 
@@ -84,6 +84,62 @@ def extract_text(uploaded_file) -> str:
     except Exception as e:
         return f"[Read failed: {e}]"
 
+def _persist_position(positions, i, result):
+    """Write a valuation result into positions[i] (keeps prior value if new is None)."""
+    p = positions[i]
+    positions[i].update(
+        fair_value     = result.get("peg_fair_value")  or p.get("fair_value", 0),
+        target         = result.get("peg_target_12m")  or p.get("target", 0),
+        dcf_fair_value = result.get("dcf_fair_value")  or p.get("dcf_fair_value", 0),
+        dcf_target     = result.get("dcf_target_12m")  or p.get("dcf_target", 0),
+        stop_loss      = result.get("stop_loss")       or p.get("stop_loss", 0),
+        thesis         = result.get("thesis")          or p.get("thesis", ""),
+        risks          = result.get("risks", []),
+        opportunities  = result.get("opportunities", []),
+    )
+
+
+def _persist_watchlist(watchlist, i, result):
+    w = watchlist[i]
+    watchlist[i].update(
+        expected_growth = result.get("expected_growth_pct")    or w.get("expected_growth", 20),
+        peg_threshold   = result.get("suggested_peg_threshold") or w.get("peg_threshold", 1.0),
+        mos_pct         = result.get("suggested_mos_pct")       or w.get("mos_pct", 0.20),
+        fair_value      = result.get("peg_fair_value")  or 0,
+        peg_target      = result.get("peg_target_12m")  or 0,
+        dcf_fair_value  = result.get("dcf_fair_value")  or 0,
+        dcf_target      = result.get("dcf_target_12m")  or 0,
+        entry_price     = result.get("entry_price")     or 0,
+        thesis          = result.get("thesis")          or w.get("thesis", ""),
+        risks           = result.get("risks", []),
+        opportunities   = result.get("opportunities", []),
+    )
+
+
+def _show_valuation_result(result):
+    """Render the 5 valuation metrics + thesis/risks/opps from a result dict."""
+    v1, v2, v3, v4, v5 = st.columns(5)
+    v1.metric("FV — PEG",     _num(result.get("peg_fair_value")))
+    v2.metric("Target — PEG", _num(result.get("peg_target_12m")))
+    v3.metric("FV — DCF",     _num(result.get("dcf_fair_value")))
+    v4.metric("Target — DCF", _num(result.get("dcf_target_12m")))
+    v5.metric("Stop Loss",    _num(result.get("stop_loss")))
+    if result.get("thesis"):
+        st.markdown(f"**Thesis:** {result['thesis']}")
+    st.caption(f"*{result.get('valuation_basis','')}*  ·  confidence: {result.get('data_confidence','?')}")
+    col_r, col_o = st.columns(2)
+    if result.get("risks"):
+        with col_r:
+            st.markdown("**⚠️ Risks**")
+            for r in result["risks"]:
+                st.markdown(f"- {r}")
+    if result.get("opportunities"):
+        with col_o:
+            st.markdown("**🚀 Opportunities**")
+            for o in result["opportunities"]:
+                st.markdown(f"- {o}")
+
+
 def send_analysis_to_telegram(ticker, market, avg_cost, result):
     msg  = f"*AI Valuation: {ticker}* ({market})\n\n"
     msg += f"*Avg Cost:* `{avg_cost:,.2f}`\n"
@@ -102,6 +158,56 @@ def run_analysis(ticker, market, avg_cost, news_items, uploaded_texts) -> dict:
     current_price = price_data.get("price", avg_cost) if "error" not in price_data else avg_cost
     currency      = price_data.get("currency", "INR" if market == "IN" else "USD")
     return _analyze(ticker, market, avg_cost, current_price, currency, news_items, uploaded_texts or None)
+
+
+def render_completion_form(scope, ticker, market, avg_cost):
+    """
+    If a stashed analysis for this ticker has missing inputs, show a manual-entry
+    form. When the user fills the gaps and clicks Recalculate, recompute via pure
+    Python (NO LLM) and return the new result. scope: 'pos' | 'wl'.
+    """
+    skey = f"ares_{scope}_{ticker}"
+    res  = st.session_state.get(skey)
+    if not res or not res.get("missing_inputs"):
+        return None
+
+    inp = res.get("_inputs", {})
+    pretty = {"estimated_eps": "EPS", "estimated_growth_pct": "Growth %",
+              "estimated_fcf_per_share": "FCF/share"}
+    miss = ", ".join(pretty.get(m, m) for m in res["missing_inputs"])
+    st.warning(f"AI could not estimate: **{miss}**. Look these up (Screener.in / "
+               f"yfinance / annual report) and enter below — I'll calculate instantly, no AI call.")
+
+    with st.form(f"complete_{scope}_{ticker}"):
+        c1, c2, c3 = st.columns(3)
+        eps    = c1.number_input("EPS (per share)",       value=float(inp.get("eps") or 0),   step=0.5, key=f"eps_{scope}_{ticker}")
+        growth = c2.number_input("Growth % (annual)",     value=float(inp.get("growth") or 0), step=1.0, key=f"g_{scope}_{ticker}")
+        fcf    = c3.number_input("FCF/share (optional)",  value=float(inp.get("fcf") or 0),   step=0.5, key=f"fcf_{scope}_{ticker}")
+        c4, c5 = st.columns(2)
+        wacc   = c4.number_input("WACC % (optional)",     value=float(inp.get("wacc") or 0),  step=0.5, key=f"w_{scope}_{ticker}")
+        tg     = c5.number_input("Terminal growth %",     value=float(inp.get("tg") or 3.0),  step=0.5, key=f"tg_{scope}_{ticker}")
+        if st.form_submit_button("🔄  Recalculate with my inputs", type="primary"):
+            inputs = {
+                "estimated_eps":           eps or None,
+                "estimated_growth_pct":    growth or None,
+                "estimated_fcf_per_share": fcf or None,
+                "wacc_pct":                wacc or None,
+                "terminal_growth_pct":     tg or None,
+                "business_risk":           inp.get("risk", "medium"),
+            }
+            narrative = {"thesis": res.get("thesis", ""), "risks": res.get("risks", []),
+                         "opportunities": res.get("opportunities", [])}
+            pd = get_price(ticker, market)
+            cp = pd.get("price", avg_cost) if "error" not in pd else avg_cost
+            if scope == "pos":
+                new = _recompute(market, cp, avg_cost, inputs, narrative)
+            else:
+                narrative["suggested_peg_threshold"] = res.get("suggested_peg_threshold", 1.0)
+                narrative["suggested_mos_pct"]       = res.get("suggested_mos_pct", 0.20)
+                new = _recompute_wl(market, cp, inputs, narrative)
+            st.session_state[skey] = new
+            return new
+    return None
 
 # ── page ──────────────────────────────────────────────────────────────────────
 
@@ -205,43 +311,25 @@ with tab1:
                     docs.append(("pasted_text", raw_text.strip()))
                 with st.spinner("Analysing (Groq → Gemini → OpenAI fallback)…"):
                     result = run_analysis(p["ticker"], p["market"], p["avg_cost"], recent_news, docs)
-
                 if "error" in result:
                     st.error(f"Analysis failed: {result['error']}")
                 else:
-                    positions[i].update(
-                        fair_value    = result.get("peg_fair_value",  fv),
-                        target        = result.get("peg_target_12m",  tgt),
-                        dcf_fair_value= result.get("dcf_fair_value",  dcf_fv),
-                        dcf_target    = result.get("dcf_target_12m",  dcf_tgt),
-                        stop_loss     = result.get("stop_loss",       sl),
-                        thesis        = result.get("thesis",          thesis),
-                        risks         = result.get("risks",           []),
-                        opportunities = result.get("opportunities",   []),
-                    )
+                    _persist_position(positions, i, result)
                     save(positions, watchlist)
                     send_analysis_to_telegram(p["ticker"], p["market"], p["avg_cost"], result)
+                    st.session_state[f"ares_pos_{p['ticker']}"] = result
+                    st.rerun()
 
-                    st.success("✅ Analysis complete — sent to Telegram!")
-                    v1, v2, v3, v4, v5 = st.columns(5)
-                    v1.metric("FV — PEG",      f"{_num(result.get('peg_fair_value'))}")
-                    v2.metric("Target — PEG",  f"{_num(result.get('peg_target_12m'))}")
-                    v3.metric("FV — DCF",      f"{_num(result.get('dcf_fair_value'))}")
-                    v4.metric("Target — DCF",  f"{_num(result.get('dcf_target_12m'))}")
-                    v5.metric("Stop Loss",     f"{_num(result.get('stop_loss'))}")
-                    st.markdown(f"**Thesis:** {result.get('thesis','')}")
-                    st.caption(f"*Valuation basis: {result.get('valuation_basis','')}*")
-                    col_risk, col_opp = st.columns(2)
-                    if result.get("risks"):
-                        with col_risk:
-                            st.markdown("**⚠️ Risk factors**")
-                            for r in result["risks"]:
-                                st.markdown(f"- {r}")
-                    if result.get("opportunities"):
-                        with col_opp:
-                            st.markdown("**🚀 Growth opportunities**")
-                            for o in result["opportunities"]:
-                                st.markdown(f"- {o}")
+            # Persistent result display + manual-completion form (survives reruns)
+            _ares = st.session_state.get(f"ares_pos_{p['ticker']}")
+            if _ares:
+                _show_valuation_result(_ares)
+                _new = render_completion_form("pos", p["ticker"], p["market"], p["avg_cost"])
+                if _new:
+                    _persist_position(positions, i, _new)
+                    save(positions, watchlist)
+                    send_analysis_to_telegram(p["ticker"], p["market"], p["avg_cost"], _new)
+                    st.success("✅ Recalculated with your inputs — saved & sent to Telegram!")
                     st.rerun()
 
         st.divider()
@@ -425,45 +513,26 @@ with tab2:
                 currency      = price_data.get("currency", "INR" if w["market"] == "IN" else "USD")
                 with st.spinner("Analysing (Groq → Gemini → OpenAI fallback)…"):
                     result = _analyze_wl(w["ticker"], w["market"], current_price, currency, wl_news, docs or None)
-
                 if "error" in result:
                     st.error(f"Analysis failed: {result['error']}")
                 else:
-                    watchlist[i].update(
-                        expected_growth = result.get("expected_growth_pct",    w["expected_growth"]),
-                        peg_threshold   = result.get("suggested_peg_threshold",w["peg_threshold"]),
-                        mos_pct         = result.get("suggested_mos_pct",      w["mos_pct"]),
-                        fair_value      = result.get("peg_fair_value",         0),
-                        peg_target      = result.get("peg_target_12m",         0),
-                        dcf_fair_value  = result.get("dcf_fair_value",         0),
-                        dcf_target      = result.get("dcf_target_12m",         0),
-                        entry_price     = result.get("entry_price",            0),
-                        thesis          = result.get("thesis",                 w.get("thesis","")),
-                        risks           = result.get("risks",                  []),
-                        opportunities   = result.get("opportunities",          []),
-                    )
+                    _persist_watchlist(watchlist, i, result)
                     save(positions, watchlist)
                     tg_wl(w["ticker"], w["market"], current_price, result)
+                    st.session_state[f"ares_wl_{w['ticker']}"] = result
+                    st.rerun()
 
-                    st.success("✅ Analysis complete — sent to Telegram!")
-                    m1,m2,m3,m4,m5,m6 = st.columns(6)
-                    m1.metric("Growth",      f"{result.get('expected_growth_pct',0)}%")
-                    m2.metric("FV (PEG)",    f"{_num(result.get('peg_fair_value'))}")
-                    m3.metric("FV (DCF)",    f"{_num(result.get('dcf_fair_value'))}")
-                    m4.metric("Entry price", f"{_num(result.get('entry_price'))}")
-                    m5.metric("Max PEG",     result.get("suggested_peg_threshold",1.0))
-                    m6.metric("Min MOS",     f"{int(result.get('suggested_mos_pct',0.2)*100)}%")
-                    st.markdown(f"**Thesis:** {result.get('thesis','')}")
-                    st.caption(f"*{result.get('valuation_basis','')}*")
-                    col_r, col_o = st.columns(2)
-                    if result.get("risks"):
-                        with col_r:
-                            st.markdown("**⚠️ Risks**")
-                            for r in result["risks"]: st.markdown(f"- {r}")
-                    if result.get("opportunities"):
-                        with col_o:
-                            st.markdown("**🚀 Opportunities**")
-                            for o in result["opportunities"]: st.markdown(f"- {o}")
+            _wres = st.session_state.get(f"ares_wl_{w['ticker']}")
+            if _wres:
+                _show_valuation_result(_wres)
+                _wnew = render_completion_form("wl", w["ticker"], w["market"], 0)
+                if _wnew:
+                    _persist_watchlist(watchlist, i, _wnew)
+                    save(positions, watchlist)
+                    pd2 = get_price(w["ticker"], w["market"])
+                    cp2 = pd2.get("price", 0) if "error" not in pd2 else 0
+                    tg_wl(w["ticker"], w["market"], cp2, _wnew)
+                    st.success("✅ Recalculated with your inputs — saved & sent to Telegram!")
                     st.rerun()
 
         st.divider()
