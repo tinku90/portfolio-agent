@@ -16,8 +16,41 @@ from groq import Groq
 from src.data.news import fetch_news
 from src.data.prices import get_price
 from src.analysis.ai_valuation import analyze_position as _analyze
-from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
+
+def _analyze_wl(ticker, market, current_price, currency, news_items=None, extra_texts=None):
+    import os, json
+    from groq import Groq
+    key = os.environ.get("GROQ_API_KEY", "")
+    if not key:
+        return {"error": "GROQ_API_KEY not set"}
+    news_text = "\n".join(f"- {n['title']}" for n in (news_items or [])[:10]) or "No recent news."
+    docs_section = (
+        "Uploaded documents:\n" + "\n\n---\n\n".join(f"[{n}]:\n{t[:15000]}" for n, t in extra_texts)
+        if extra_texts else "No documents — use news and general knowledge."
+    )
+    prompt = f"""Analyze {ticker} ({market}) as a potential buy. Price: {current_price} {currency}.
+
+News: {news_text}
+
+{docs_section}
+
+Compute using BOTH methods:
+A) PEG: fair_PE = growth%, PEG_FV = EPS*(1+g)^2*fair_PE, target = FV*1.10
+B) DCF: 5-year, 3% terminal, 12% discount IN / 10% US, target = FV*1.08
+
+Return ONLY JSON:
+{{"expected_growth_pct":<n>,"peg_fair_value":<n>,"peg_target_12m":<n>,"dcf_fair_value":<n>,"dcf_target_12m":<n>,"suggested_peg_threshold":<n>,"suggested_mos_pct":<n>,"entry_price":<n>,"thesis":"...","risks":["..."],"opportunities":["..."],"valuation_basis":"..."}}"""
+    try:
+        resp = Groq(api_key=key).chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1, max_tokens=1000,
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        return {"error": str(e)}
 
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
