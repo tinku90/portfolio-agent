@@ -1,0 +1,19 @@
+candidates:
+  - ticker: EIEL
+    market: IN
+    expected_growth: 37
+    peg_threshold: 0.6
+    mos_pct: 0.20
+    thesis: "Water EPC, 35-40% growth, PEG 0.41"
+  - ticker: DEEPINDS
+    market: IN
+    expected_growth: 28
+    peg_threshold: 0.9
+    mos_pct: 0.20
+    thesis: "Oil services, 25-30% growth, cheap PEG"
+  - ticker: GOOGL
+    market: US
+    expected_growth: 15
+    peg_threshold: 1.5
+    mos_pct: 0.15
+    thesis: "Search moat + cloud + Waymo optionality"

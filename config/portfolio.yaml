@@ -1,0 +1,28 @@
+positions:
+  - ticker: WABAG
+    market: IN
+    qty: 50
+    avg_cost: 1200
+    entry_date: 2025-08-15
+    thesis: "Water EPC, 19% rev growth, 13.3% EBITDA margin, AA- rated, net cash positive, multi-decade tailwind from JJM 2.0 and KSA Vision 2030"
+    fair_value: 1400
+    stop_loss: 950
+    target: 1830
+  - ticker: KPIGREEN
+    market: IN
+    qty: 100
+    avg_cost: 380
+    entry_date: 2025-09-01
+    thesis: "IPP transition, 40-50% growth, but heavy capex and RPT concerns"
+    fair_value: 680
+    stop_loss: 300
+    target: 900
+  - ticker: NVDA
+    market: US
+    qty: 10
+    avg_cost: 145
+    entry_date: 2025-06-01
+    thesis: "AI compute monopoly, Blackwell ramp, data centre capex cycle"
+    fair_value: 180
+    stop_loss: 120
+    target: 220
