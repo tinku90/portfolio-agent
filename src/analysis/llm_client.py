@@ -2,16 +2,24 @@
 """
 Unified LLM client with TokenSaver middleware and automatic fallback chain:
 
-  1. Groq  llama-3.3-70b-versatile   (free — 100K TPD)
-  2. Groq  qwen/qwen3-32b             (free — separate TPD limit)
-  3. Gemini 2.0 Flash                 (free — 1M tokens/day via Google AI Studio)
-  4. OpenAI gpt-4o-mini               (paid — your OpenAI key)
+  1. Groq  llama-3.3-70b-versatile   (free - 100K TPD)
+  2. Groq  qwen/qwen3-32b             (free - separate TPD limit)
+  3. Gemini 2.0 Flash                 (free - 1M tokens/day via Google AI Studio)
+  4. OpenAI gpt-4o-mini               (paid - your OpenAI key)
 
 Rate-limit detection uses exception TYPE (not fragile string parsing).
 Every attempt is logged so you can see exactly which model ran.
 """
 import os, json, sys
 from pathlib import Path
+
+# Windows consoles default to cp1252 which crashes on Unicode in print().
+# Reconfigure stdout/stderr to UTF-8 so logging never raises UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 try:
     from src.analysis.token_saver import finance_optimize as _optimize, \
@@ -20,14 +28,14 @@ try:
 except ImportError:
     _TS_AVAILABLE = False
 
-# ── Model names ───────────────────────────────────────────────────────────────
+# -- Model names ---------------------------------------------------------------
 GROQ_PRIMARY    = "llama-3.3-70b-versatile"
 GROQ_SECONDARY  = "qwen/qwen3-32b"
 GEMINI_MODEL    = "gemini-2.0-flash"
 OPENAI_MODEL    = "gpt-4o-mini"
 
 
-# ── TokenSaver middleware ─────────────────────────────────────────────────────
+# -- TokenSaver middleware -----------------------------------------------------
 
 def _optimize_messages(messages: list) -> tuple[list, dict]:
     if not _TS_AVAILABLE:
@@ -66,7 +74,7 @@ def token_saver_stats() -> dict:
     return _cache_stats() if _TS_AVAILABLE else {"available": False}
 
 
-# ── Rate-limit detection ──────────────────────────────────────────────────────
+# -- Rate-limit detection ------------------------------------------------------
 
 def _is_rate_limit(e: Exception) -> bool:
     """
@@ -91,7 +99,7 @@ def _is_rate_limit(e: Exception) -> bool:
                                    "resource_exhausted", "too many requests"))
 
 
-# ── Provider helpers ──────────────────────────────────────────────────────────
+# -- Provider helpers ----------------------------------------------------------
 
 def _call_groq(model: str, messages, response_format, temperature, max_tokens) -> str:
     from groq import Groq
@@ -108,7 +116,7 @@ def _call_groq(model: str, messages, response_format, temperature, max_tokens) -
 
 def _call_gemini(messages, response_format, temperature, max_tokens) -> str:
     """
-    Uses Google's OpenAI-compatible endpoint — same interface, no extra SDK.
+    Uses Google's OpenAI-compatible endpoint - same interface, no extra SDK.
     Get a free key at: https://aistudio.google.com/app/apikey
     """
     from openai import OpenAI
@@ -140,7 +148,7 @@ def _call_openai(messages, response_format, temperature, max_tokens) -> str:
     return resp.choices[0].message.content
 
 
-# ── Fallback chain ────────────────────────────────────────────────────────────
+# -- Fallback chain ------------------------------------------------------------
 
 _PROVIDERS = [
     ("Groq/llama-3.3-70b",  lambda m, rf, t, mx: _call_groq(GROQ_PRIMARY,   m, rf, t, mx)),
@@ -166,24 +174,24 @@ def complete(messages: list, response_format=None,
 
     for name, fn in _PROVIDERS:
         try:
-            print(f"[LLM] trying {name}…")
+            print(f"[LLM] trying {name}...")
             result = fn(opt_msgs, response_format, temperature, max_tokens)
             print(f"[LLM] {name} OK")
             return result
         except Exception as e:
             err_str = f"{name}: {type(e).__name__}: {e}"
             errors.append(err_str)
-            print(f"[LLM] {name} FAILED — {type(e).__name__}: {str(e)[:120]}")
+            print(f"[LLM] {name} FAILED - {type(e).__name__}: {str(e)[:120]}")
 
             if _is_rate_limit(e):
-                print(f"[LLM] rate limit / quota hit on {name} → trying next provider")
+                print(f"[LLM] rate limit / quota hit on {name} -> trying next provider")
                 continue   # always fall through on rate limits
 
             # Non-quota error on first provider = likely a bad prompt / auth issue.
             # Still try next providers but flag it.
             if name == _PROVIDERS[0][0]:
                 hard_failed = True
-                print(f"[LLM] non-quota error on primary — still trying fallbacks")
+                print(f"[LLM] non-quota error on primary - still trying fallbacks")
             continue
 
     raise RuntimeError(
@@ -201,7 +209,7 @@ def complete_json(messages: list, temperature: float = 0.1,
     return json.loads(raw)
 
 
-# ── Vision (image → text) with fallback ───────────────────────────────────────
+# -- Vision (image -> text) with fallback ---------------------------------------
 
 _VISION_PROVIDERS = [
     ("Groq/llama-4-scout", "groq",   "meta-llama/llama-4-scout-17b-16e-instruct"),
@@ -225,7 +233,7 @@ def complete_vision(prompt_text: str, image_b64: str, mime: str = "image/jpeg",
 
     for name, kind, model in _VISION_PROVIDERS:
         try:
-            print(f"[Vision] trying {name}…")
+            print(f"[Vision] trying {name}...")
             if kind == "groq":
                 from groq import Groq
                 key = os.environ.get("GROQ_API_KEY", "")
@@ -252,7 +260,7 @@ def complete_vision(prompt_text: str, image_b64: str, mime: str = "image/jpeg",
             return resp.choices[0].message.content
         except Exception as e:
             errors.append(f"{name}: {type(e).__name__}: {e}")
-            print(f"[Vision] {name} FAILED — {type(e).__name__}: {str(e)[:100]}")
+            print(f"[Vision] {name} FAILED - {type(e).__name__}: {str(e)[:100]}")
             continue
 
     return f"[Image extraction failed across all providers: {errors}]"

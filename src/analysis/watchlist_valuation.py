@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Watchlist AI Valuation — hybrid architecture (same as ai_valuation):
+Watchlist AI Valuation - hybrid architecture (same as ai_valuation):
   LLM estimates INPUTS (growth, WACC, EPS, risk, thesis)
   Python computes all MATH (PEG FV, DCF FV, targets, entry price)
 
@@ -23,7 +23,7 @@ Recent news:
 
 {docs_section}
 
-Return ONLY valid JSON. Use null for any field you cannot estimate — do NOT guess:
+Return ONLY valid JSON. Use null for any field you cannot estimate - do NOT guess:
 {{
   "estimated_eps":           <number | null>,
   "estimated_fcf_per_share": <number | null>,
@@ -47,7 +47,7 @@ def analyze_watchlist(ticker, market, current_price, currency,
         "Uploaded documents:\n" + "\n\n---\n\n".join(
             f"[{name}]:\n{text[:15000]}" for name, text in extra_texts
         ) if extra_texts else
-        "No documents — estimate from news and your knowledge of this company."
+        "No documents - estimate from news and your knowledge of this company."
     )
     base_prompt = INPUTS_PROMPT.format(
         ticker=ticker, market=market,
@@ -69,7 +69,7 @@ def analyze_watchlist(ticker, market, current_price, currency,
         pass
     prompt = prepare_prompt(base_prompt, facts=facts, domain="financial")
 
-    # ── Step 1: LLM estimates inputs (fallback chain handles 429s) ────────────
+    # -- Step 1: LLM estimates inputs (fallback chain handles 429s) ------------
     try:
         inp = complete_json([{"role": "user", "content": prompt}], max_tokens=600)
     except Exception as e:
@@ -77,7 +77,7 @@ def analyze_watchlist(ticker, market, current_price, currency,
     if "error" in inp:
         return inp
 
-    # ── Step 2: Python computes valuations ────────────────────────────────────
+    # -- Step 2: Python computes valuations ------------------------------------
     eps    = inp.get("estimated_eps")
     fcf    = inp.get("estimated_fcf_per_share") or eps
     growth = inp.get("estimated_growth_pct")
@@ -113,7 +113,7 @@ def analyze_watchlist(ticker, market, current_price, currency,
         ),
     }
 
-    # ── Step 3: validate ──────────────────────────────────────────────────────
+    # -- Step 3: validate ------------------------------------------------------
     validation = validate_financial_response(result, current_price)
     if not validation.passed:
         result["_validation_errors"] = validation.errors

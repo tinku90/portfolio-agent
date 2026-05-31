@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-AI Valuation — hybrid architecture:
+AI Valuation - hybrid architecture:
   LLM estimates forward-looking INPUTS  (growth, WACC, EPS estimate, thesis, risks)
   Python computes all MATH              (DCF fair value, PEG fair value, targets, MOS)
 
 This eliminates hallucinated calculations entirely.
-If LLM cannot estimate an input, it returns null → Python returns null for that method.
+If LLM cannot estimate an input, it returns null -> Python returns null for that method.
 """
 from src.analysis.llm_client import complete_json
 from src.analysis.valuation import (
@@ -16,16 +16,16 @@ from src.analysis.token_saver.hallucination_guard import (
     prepare_prompt, validate_financial_response,
 )
 
-# ── LLM prompt: ask ONLY for inputs, not calculations ────────────────────────
+# -- LLM prompt: ask ONLY for inputs, not calculations ------------------------
 INPUTS_PROMPT = """You are a buy-side equity analyst. Estimate the INPUTS needed to value {ticker} ({market}-listed).
-DO NOT calculate fair value yourself — provide only the input figures listed below.
+DO NOT calculate fair value yourself - provide only the input figures listed below.
 
 Recent news:
 {news_text}
 
 {docs_section}
 
-Return ONLY valid JSON. Use null for any field you cannot estimate from available data — do NOT guess:
+Return ONLY valid JSON. Use null for any field you cannot estimate from available data - do NOT guess:
 {{
   "estimated_eps":           <number | null>,   // trailing or forward EPS per share
   "estimated_fcf_per_share": <number | null>,   // free cash flow per share (preferred over EPS for DCF)
@@ -74,7 +74,7 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
         "Uploaded documents:\n" + "\n\n---\n\n".join(
             f"[{name}]:\n{text[:15000]}" for name, text in extra_texts
         ) if extra_texts else
-        "No documents — estimate from news and your knowledge of this company."
+        "No documents - estimate from news and your knowledge of this company."
     )
 
     base_prompt = INPUTS_PROMPT.format(
@@ -86,7 +86,7 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
     facts  = _get_market_facts(ticker, market, avg_cost, current_price, currency)
     prompt = prepare_prompt(base_prompt, facts=facts, domain="financial")
 
-    # ── Step 1: LLM estimates inputs ──────────────────────────────────────────
+    # -- Step 1: LLM estimates inputs ------------------------------------------
     try:
         inputs = complete_json([{"role": "user", "content": prompt}], max_tokens=600)
     except Exception as e:
@@ -95,7 +95,7 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
     if "error" in inputs:
         return inputs
 
-    # ── Step 2: Python calculates valuations ──────────────────────────────────
+    # -- Step 2: Python calculates valuations ----------------------------------
     eps       = inputs.get("estimated_eps")
     fcf       = inputs.get("estimated_fcf_per_share") or eps   # FCF preferred; fallback to EPS
     growth    = inputs.get("estimated_growth_pct")
@@ -111,7 +111,7 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
     dcf_fv  = dcf_fair_value(fcf, growth, wacc, tg) if (fcf and growth) else None
     dcf_tgt = dcf_target(fcf, growth, wacc, tg)      if dcf_fv        else None
 
-    # Stop loss from risk level (never hallucinated — pure formula)
+    # Stop loss from risk level (never hallucinated - pure formula)
     sl = suggested_stop_loss(current_price, risk)
 
     # MOS
@@ -138,13 +138,13 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
             "tg":     tg,     "risk":   risk,
         },
         "valuation_basis": (
-            f"PEG: EPS={eps}, growth={growth}% → FV={peg_fv}. "
-            f"DCF: FCF={fcf}, growth={growth}%, WACC={wacc}%, TG={tg}% → FV={dcf_fv}. "
+            f"PEG: EPS={eps}, growth={growth}% -> FV={peg_fv}. "
+            f"DCF: FCF={fcf}, growth={growth}%, WACC={wacc}%, TG={tg}% -> FV={dcf_fv}. "
             f"Confidence: {inputs.get('data_confidence','medium')}."
         ),
     }
 
-    # ── Step 3: Validate outputs ──────────────────────────────────────────────
+    # -- Step 3: Validate outputs ----------------------------------------------
     validation = validate_financial_response(result, current_price, avg_cost)
     if not validation.passed:
         result["_validation_errors"]   = validation.errors
