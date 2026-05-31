@@ -8,6 +8,8 @@ ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
+import base64
+import pandas as pd
 import pdfplumber
 from groq import Groq
 from src.data.news import fetch_news
@@ -34,16 +36,46 @@ def save(positions, watchlist):
     with open(WATCHLIST_FILE, "w") as f:
         yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
 
+def extract_text_from_image(raw: bytes, filename: str) -> str:
+    try:
+        ext  = filename.lower().rsplit(".", 1)[-1]
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        b64  = base64.b64encode(raw).decode()
+        resp = Groq(api_key=GROQ_KEY).chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                {"type": "text", "text": (
+                    "Extract all text and financial data visible in this image. "
+                    "If it contains tables or charts, describe the key numbers and trends clearly."
+                )},
+            ]}],
+            max_tokens=2000,
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"[Image extraction failed: {e}]"
+
 def extract_text(uploaded_file) -> str:
     try:
-        raw = uploaded_file.read()
-        if uploaded_file.name.lower().endswith(".pdf"):
+        raw  = uploaded_file.read()
+        name = uploaded_file.name.lower()
+        if name.endswith(".pdf"):
             text = ""
             with pdfplumber.open(io.BytesIO(raw)) as pdf:
                 for page in pdf.pages[:30]:
                     text += (page.extract_text() or "") + "\n"
             return text[:40000]
-        return raw.decode("utf-8", errors="ignore")[:40000]
+        elif name.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(raw))
+            return df.to_string(index=False)[:40000]
+        elif name.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(io.BytesIO(raw))
+            return df.to_string(index=False)[:40000]
+        elif name.endswith((".jpg", ".jpeg", ".png")):
+            return extract_text_from_image(raw, uploaded_file.name)
+        else:
+            return raw.decode("utf-8", errors="ignore")[:40000]
     except Exception as e:
         return f"[Read failed: {e}]"
 
@@ -193,11 +225,11 @@ with tab1:
 
             st.markdown("---")
             st.markdown("#### Upload documents *(optional)*")
-            st.caption("Accepted: PDF or TXT — concall transcripts (Q1, Q2), annual report")
+            st.caption("Accepted: PDF, TXT, JPG/PNG (screenshots), XLS/CSV (financials) — concall transcripts, annual reports, screener exports")
             uploads = st.file_uploader(
                 "Drop files here",
                 accept_multiple_files=True,
-                type=["pdf", "txt"],
+                type=["pdf", "txt", "jpg", "jpeg", "png", "xls", "xlsx", "csv"],
                 key=f"up_{p['ticker']}",
             )
             raw_text = st.text_area(
