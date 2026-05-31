@@ -54,7 +54,15 @@ def alert_opportunity(v):
 def digest(positions, recent_alerts):
     msg = "*WEEKLY DIGEST*\n\n*Portfolio:*\n"
     for p in positions:
-        msg += f"- {p['ticker']} ({p['market']}) qty {p['qty']} @ {p['avg_cost']}\n"
+        peg_fv  = p.get("fair_value", 0)
+        dcf_fv  = p.get("dcf_fair_value", 0)
+        peg_tgt = p.get("target", 0)
+        dcf_tgt = p.get("dcf_target", 0)
+        msg += f"\n*{p['ticker']}* ({p['market']}) qty {p['qty']} @ {p['avg_cost']}\n"
+        if peg_fv or dcf_fv:
+            msg += f"  Fair Value — PEG: {peg_fv or '—'}  |  DCF: {dcf_fv or '—'}\n"
+        if peg_tgt or dcf_tgt:
+            msg += f"  Target 12m — PEG: {peg_tgt or '—'}  |  DCF: {dcf_tgt or '—'}\n"
     msg += f"\n*Alerts this week:* {len(recent_alerts)}\n"
     for a in recent_alerts[:10]:
         msg += f"- [{a['kind']}] {a['ticker']}\n"

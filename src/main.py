@@ -37,9 +37,9 @@ def job_hourly():
         if "error" in p:
             continue
         trigger = None
-        if p["price"] <= pos["stop_loss"]:
+        if pos.get("stop_loss", 0) > 0 and p["price"] <= pos["stop_loss"]:
             trigger = f"Stop loss hit ({pos['stop_loss']})"
-        elif p["price"] >= pos["target"]:
+        elif pos.get("target", 0) > 0 and p["price"] >= pos["target"]:
             trigger = f"Target reached ({pos['target']})"
         elif abs(p["price"]/p["prev_close"] - 1) > 0.05:
             trigger = f"Moved {(p['price']/p['prev_close']-1)*100:+.1f}% intraday"

@@ -57,19 +57,34 @@ Recent news:
 Current price : {current_price} {currency}
 Investor's avg buy cost: {avg_cost}
 
-Your tasks:
-1. Estimate intrinsic fair value per share (use DCF, P/E, or EV/EBITDA — whichever the data supports best).
-2. Set a realistic 12-month target price.
-3. Set an absolute stop-loss price level (not a %).
-4. Write a concise 2-3 sentence investment thesis.
-5. List 3-5 key risk factors specific to this stock.
-6. List 3-5 growth opportunities or upcoming catalysts for this stock.
-7. Briefly explain your valuation methodology in one sentence.
+Use BOTH valuation methods below. Do not skip either.
+
+A) PEG-based (Peter Lynch):
+   - Fair P/E = expected earnings growth rate (e.g. 20% growth → P/E 20)
+   - PEG fair value = EPS × (1 + g)² × fair_P/E
+   - PEG 12m target = PEG fair value × 1.10
+
+B) DCF-based (5-year):
+   - Use FCF per share (or EPS as proxy if FCF unavailable)
+   - Project 5 years at estimated growth rate
+   - Terminal value using 3% perpetual growth
+   - Discount rate: 12% for IN stocks, 10% for US stocks
+   - DCF fair value = PV of projected FCFs + PV of terminal value
+   - DCF 12m target = DCF fair value × 1.08
+
+Also:
+- Set an absolute stop-loss price (not a %).
+- Write a 2-3 sentence investment thesis.
+- List 3-5 key risk factors.
+- List 3-5 growth opportunities or upcoming catalysts.
+- One sentence explaining key assumptions.
 
 Return ONLY valid JSON:
 {{
-  "fair_value": <number>,
-  "target_12m": <number>,
+  "peg_fair_value": <number>,
+  "peg_target_12m": <number>,
+  "dcf_fair_value": <number>,
+  "dcf_target_12m": <number>,
   "stop_loss": <number>,
   "thesis": "...",
   "risks": ["...", "...", "..."],
@@ -121,19 +136,22 @@ with tab1:
     st.subheader(f"Holdings · {len(positions)} stocks")
 
     for i, p in enumerate(positions):
-        fv  = p.get("fair_value") or 0
-        tgt = p.get("target")     or 0
-        sl  = p.get("stop_loss")  or 0
+        fv      = p.get("fair_value")      or 0
+        tgt     = p.get("target")         or 0
+        sl      = p.get("stop_loss")      or 0
+        dcf_fv  = p.get("dcf_fair_value") or 0
+        dcf_tgt = p.get("dcf_target")     or 0
 
         # ── header row ────────────────────────────────────────────────────────
-        h1, h2, h3, h4, h5, h6, h7 = st.columns([2.5, 1, 1.2, 1.2, 1.2, 1.2, 0.6])
+        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([2.2, 1, 1.1, 1.1, 1.1, 1.1, 1.1, 0.5])
         h1.markdown(f"### {p['ticker']}  `{p['market']}`")
-        h2.metric("Qty",       int(p["qty"]))
-        h3.metric("Avg Cost",  f"{p['avg_cost']:,.0f}")
-        h4.metric("Fair Value",f"{fv:,.0f}"  if fv  else "—")
-        h5.metric("Target",    f"{tgt:,.0f}" if tgt else "—")
-        h6.metric("Stop Loss", f"{sl:,.0f}"  if sl  else "—")
-        if h7.button("🗑️", key=f"del_{i}", help=f"Remove {p['ticker']}"):
+        h2.metric("Qty",            int(p["qty"]))
+        h3.metric("Avg Cost",       f"{p['avg_cost']:,.0f}")
+        h4.metric("FV (PEG)",       f"{fv:,.0f}"      if fv      else "—")
+        h5.metric("Target (PEG)",   f"{tgt:,.0f}"     if tgt     else "—")
+        h6.metric("FV (DCF)",       f"{dcf_fv:,.0f}"  if dcf_fv  else "—")
+        h7.metric("Stop Loss",      f"{sl:,.0f}"      if sl      else "—")
+        if h8.button("🗑️", key=f"del_{i}", help=f"Remove {p['ticker']}"):
             save([x for x in positions if x["ticker"] != p["ticker"]], watchlist)
             st.rerun()
 
@@ -200,22 +218,26 @@ with tab1:
                     st.error(f"Analysis failed: {result['error']}")
                 else:
                     positions[i].update(
-                        fair_value    = result.get("fair_value",    fv),
-                        target        = result.get("target_12m",    tgt),
-                        stop_loss     = result.get("stop_loss",     sl),
-                        thesis        = result.get("thesis",        thesis),
-                        risks         = result.get("risks",         []),
-                        opportunities = result.get("opportunities", []),
+                        fair_value    = result.get("peg_fair_value",  fv),
+                        target        = result.get("peg_target_12m",  tgt),
+                        dcf_fair_value= result.get("dcf_fair_value",  dcf_fv),
+                        dcf_target    = result.get("dcf_target_12m",  dcf_tgt),
+                        stop_loss     = result.get("stop_loss",       sl),
+                        thesis        = result.get("thesis",          thesis),
+                        risks         = result.get("risks",           []),
+                        opportunities = result.get("opportunities",   []),
                     )
                     save(positions, watchlist)
 
                     st.success("✅ Analysis complete — position updated!")
-                    r1, r2, r3 = st.columns(3)
-                    r1.metric("Fair Value",    f"{result['fair_value']:,.0f}")
-                    r2.metric("Target (12m)",  f"{result['target_12m']:,.0f}")
-                    r3.metric("Stop Loss",     f"{result['stop_loss']:,.0f}")
+                    v1, v2, v3, v4, v5 = st.columns(5)
+                    v1.metric("FV — PEG",      f"{result.get('peg_fair_value',0):,.0f}")
+                    v2.metric("Target — PEG",  f"{result.get('peg_target_12m',0):,.0f}")
+                    v3.metric("FV — DCF",      f"{result.get('dcf_fair_value',0):,.0f}")
+                    v4.metric("Target — DCF",  f"{result.get('dcf_target_12m',0):,.0f}")
+                    v5.metric("Stop Loss",     f"{result.get('stop_loss',0):,.0f}")
                     st.markdown(f"**Thesis:** {result.get('thesis','')}")
-                    st.markdown(f"**Valuation basis:** {result.get('valuation_basis','')}")
+                    st.caption(f"*Valuation basis: {result.get('valuation_basis','')}*")
                     col_risk, col_opp = st.columns(2)
                     if result.get("risks"):
                         with col_risk:
@@ -248,15 +270,17 @@ with tab1:
                 st.error(f"{new_ticker} is already in portfolio.")
             else:
                 positions.append({
-                    "ticker":     new_ticker,
-                    "market":     new_market,
-                    "qty":        float(new_qty),
-                    "avg_cost":   float(new_avg_cost),
-                    "entry_date": str(date.today()),
-                    "thesis":     "Pending analysis",
-                    "fair_value": round(new_avg_cost * 1.3, 2),
-                    "stop_loss":  round(new_avg_cost * 0.8, 2),
-                    "target":     round(new_avg_cost * 1.5, 2),
+                    "ticker":        new_ticker,
+                    "market":        new_market,
+                    "qty":           float(new_qty),
+                    "avg_cost":      float(new_avg_cost),
+                    "entry_date":    str(date.today()),
+                    "thesis":        "Pending analysis",
+                    "fair_value":    0,
+                    "dcf_fair_value":0,
+                    "stop_loss":     0,
+                    "target":        0,
+                    "dcf_target":    0,
                 })
                 save(positions, watchlist)
                 st.success(f"✅ {new_ticker} added! Click **AI Analysis** to generate fair value and target.")
