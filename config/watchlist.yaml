@@ -1,19 +1,86 @@
 candidates:
-  - ticker: EIEL
-    market: IN
-    expected_growth: 37
-    peg_threshold: 0.6
-    mos_pct: 0.20
-    thesis: "Water EPC, 35-40% growth, PEG 0.41"
-  - ticker: DEEPINDS
-    market: IN
-    expected_growth: 28
-    peg_threshold: 0.9
-    mos_pct: 0.20
-    thesis: "Oil services, 25-30% growth, cheap PEG"
-  - ticker: GOOGL
-    market: US
-    expected_growth: 15
-    peg_threshold: 1.5
-    mos_pct: 0.15
-    thesis: "Search moat + cloud + Waymo optionality"
+- dcf_fair_value: 219.15
+  dcf_target: 236.88
+  entry_price: 161.42
+  expected_growth: 25
+  fair_value: 253.19
+  industry: Engineering & Construction
+  market: IN
+  mos_pct: 15
+  opportunities:
+  - Growing demand for sustainable and eco-friendly infrastructure solutions
+  - Expansion into new markets and sectors, such as industrial water treatment
+  - Potential for strategic partnerships and acquisitions to enhance capabilities
+  peg_target: 278.51
+  peg_threshold: 0.8
+  risks:
+  - Intense competition in the water and wastewater treatment industry
+  - Regulatory changes and environmental policies affecting project viability
+  - Dependence on government contracts and public-private partnerships
+  sector: Industrials
+  thesis: Enviro Infra Engineers Limited is poised for growth due to increasing demand
+    for water and wastewater treatment infrastructure in India, driven by government
+    initiatives and urbanization. The company's strong execution capabilities, expanding
+    geographical footprint, and strategic entry into renewable energy and Zero Liquid
+    Discharge (ZLD) segments position it for long-term sustainability and profitability.
+  ticker: EIEL
+- expected_growth: 28
+  industry: Oil & Gas E&P
+  market: IN
+  mos_pct: 0.2
+  peg_threshold: 0.9
+  sector: Energy
+  thesis: Oil services, 25-30% growth, cheap PEG
+  ticker: DEEPINDS
+- expected_growth: 15
+  industry: Internet Content & Information
+  market: US
+  mos_pct: 0.15
+  peg_threshold: 1.5
+  sector: Communication Services
+  thesis: Search moat + cloud + Waymo optionality
+  ticker: GOOGL
+- dcf_fair_value: 420.26
+  dcf_target: 453.88
+  entry_price: 315.19
+  expected_growth: 31.5
+  fair_value: 676.52
+  market: IN
+  mos_pct: 0.25
+  opportunities:
+  - Expansion into Rest of World markets can diversify revenue streams.
+  - Strong pipeline of new products, including biosimilars and complex APIs.
+  - Strategic partnerships in CDMO can enhance service offerings and revenue.
+  peg_target: 744.17
+  peg_threshold: 1.0
+  risks:
+  - Analysts have cut revenue and EPS estimates, indicating potential headwinds.
+  - Regulatory challenges could impact product approvals and market entry.
+  - Increased competition in the pharmaceutical sector may affect market share.
+  thesis: Shilpa Medicare is positioned for growth with a strong focus on innovation
+    in APIs and biologics, supported by recent regulatory approvals and a robust pipeline.
+    The company's expansion into emerging markets and strategic partnerships enhance
+    its revenue potential.
+  ticker: SHILPAMED
+- dcf_fair_value: 290.61
+  dcf_target: 313.86
+  entry_price: 217.96
+  expected_growth: 15.7
+  fair_value: 321.77
+  market: IN
+  mos_pct: 0.25
+  opportunities:
+  - Expansion into European markets through acquisitions
+  - Growing demand for battery materials in the EV sector
+  - Increased customer engagement in existing markets
+  peg_target: 353.95
+  peg_threshold: 1.2
+  risks:
+  - Supply chain disruptions impacting production costs
+  - Fluctuations in raw material prices affecting margins
+  - Regulatory challenges in international markets
+  thesis: Sudeep Pharma has demonstrated consistent revenue growth and profitability,
+    with a strong operational performance and strategic acquisitions enhancing its
+    market position. The company's expansion into battery materials and nutrition
+    sectors presents significant growth opportunities.
+  ticker: SUDEEPPHRM

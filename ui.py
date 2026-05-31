@@ -42,11 +42,17 @@ def load():
         wl = yaml.safe_load(f) or {}
     return pf.get("positions") or [], wl.get("candidates") or []
 
+def _atomic_dump(data, path):
+    """Write YAML to a temp file then atomically replace — a crash mid-write
+    can never leave the real file truncated/corrupted."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+    os.replace(tmp, path)
+
 def save(positions, watchlist):
-    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-        yaml.dump({"positions": positions}, f, default_flow_style=False, allow_unicode=True)
-    with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
-        yaml.dump({"candidates": watchlist}, f, default_flow_style=False, allow_unicode=True)
+    _atomic_dump({"positions": positions},  PORTFOLIO_FILE)
+    _atomic_dump({"candidates": watchlist}, WATCHLIST_FILE)
 
 def extract_text_from_image(raw: bytes, filename: str) -> str:
     ext  = filename.lower().rsplit(".", 1)[-1]
@@ -224,6 +230,9 @@ with tab1:
     st.subheader(f"Holdings · {len(positions)} stocks")
 
     for i, p in enumerate(positions):
+        if not p.get("ticker"):
+            st.warning(f"Skipping a malformed holding (no ticker) at position {i+1}.")
+            continue
         fv      = p.get("fair_value")      or 0
         tgt     = p.get("target")         or 0
         sl      = p.get("stop_loss")      or 0
@@ -420,6 +429,9 @@ with tab2:
     st.subheader(f"Watchlist · {len(watchlist)} candidates")
 
     for i, w in enumerate(watchlist):
+        if not w.get("ticker"):
+            st.warning(f"Skipping a malformed watchlist entry (no ticker) at position {i+1}.")
+            continue
         wfv     = w.get("fair_value", 0)      or 0
         wdcf    = w.get("dcf_fair_value", 0)  or 0
         wtgt    = w.get("peg_target", 0)       or 0
