@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import yaml, os, io, json, sys
 from pathlib import Path
