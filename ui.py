@@ -149,17 +149,14 @@ with tab1:
 
         # ── edit expander ─────────────────────────────────────────────────────
         with st.expander("✏️  Edit position"):
+            st.caption("Fair value and target are set by AI Analysis only — edit trading data here.")
             with st.form(f"edit_{i}"):
                 e1, e2, e3 = st.columns(3)
-                new_qty  = e1.number_input("Quantity",   value=float(p["qty"]),             min_value=0.01, step=1.0)
-                new_cost = e2.number_input("Avg Cost",   value=float(p["avg_cost"]),         min_value=0.01, step=0.5)
-                new_sl   = e3.number_input("Stop Loss",  value=float(sl),                    min_value=0.0,  step=0.5)
-                e4, e5   = st.columns(2)
-                new_fv   = e4.number_input("Fair Value", value=float(fv),                    min_value=0.0,  step=0.5)
-                new_tgt  = e5.number_input("Target",     value=float(tgt),                   min_value=0.0,  step=0.5)
+                new_qty  = e1.number_input("Quantity",  value=float(p["qty"]),     min_value=0.01, step=1.0)
+                new_cost = e2.number_input("Avg Cost",  value=float(p["avg_cost"]),min_value=0.01, step=0.5)
+                new_sl   = e3.number_input("Stop Loss", value=float(sl),           min_value=0.0,  step=0.5)
                 if st.form_submit_button("💾  Save changes", type="primary"):
-                    positions[i].update(qty=new_qty, avg_cost=new_cost,
-                                        stop_loss=new_sl, fair_value=new_fv, target=new_tgt)
+                    positions[i].update(qty=new_qty, avg_cost=new_cost, stop_loss=new_sl)
                     save(positions, watchlist)
                     st.success("Saved!")
                     st.rerun()
