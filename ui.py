@@ -17,7 +17,7 @@ from src.data.news import fetch_news
 from src.data.prices import get_price
 from src.analysis.ai_valuation import analyze_position as _analyze, recompute as _recompute
 from src.analysis.watchlist_valuation import analyze_watchlist as _analyze_wl, recompute_watchlist as _recompute_wl
-from src.analysis.llm_client import complete_vision
+from src.analysis.llm_client import complete_vision, response_cache_stats, clear_response_cache
 from src.notify.telegram import send as tg_send, alert_watchlist_analysis as tg_wl
 
 def _num(value, spec=",.0f", na="N/A"):
@@ -32,6 +32,26 @@ def _num(value, spec=",.0f", na="N/A"):
 PORTFOLIO_FILE = ROOT / "config" / "portfolio.yaml"
 WATCHLIST_FILE = ROOT / "config" / "watchlist.yaml"
 st.set_page_config(page_title="Portfolio Agent", page_icon="📈", layout="wide")
+
+# ── sidebar: LLM cache controls ────────────────────────────────────────────────
+with st.sidebar:
+    st.header("⚙️ LLM Cache")
+    _rc = response_cache_stats()
+    st.caption(
+        f"Cached results: **{_rc.get('entries', 0)}**  ·  "
+        f"hits: {_rc.get('hits', 0)}  ·  hit-rate: {_rc.get('hit_rate', 0)}%"
+    )
+    st.session_state.setdefault("use_cache", True)
+    st.session_state["use_cache"] = st.toggle(
+        "♻️ Reuse cached AI results",
+        value=st.session_state["use_cache"],
+        help="On: identical inputs return instantly with no API cost. "
+             "Off: every Run forces a fresh LLM call.",
+    )
+    if st.button("🗑️ Clear LLM cache"):
+        clear_response_cache()
+        st.success("Cache cleared")
+        st.rerun()
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -163,7 +183,8 @@ def run_analysis(ticker, market, avg_cost, news_items, uploaded_texts) -> dict:
     price_data    = get_price(ticker, market)
     current_price = price_data.get("price", avg_cost) if "error" not in price_data else avg_cost
     currency      = price_data.get("currency", "INR" if market == "IN" else "USD")
-    return _analyze(ticker, market, avg_cost, current_price, currency, news_items, uploaded_texts or None)
+    uc = st.session_state.get("use_cache", True)
+    return _analyze(ticker, market, avg_cost, current_price, currency, news_items, uploaded_texts or None, use_cache=uc)
 
 
 def render_completion_form(scope, ticker, market, avg_cost):
@@ -480,7 +501,7 @@ with tab2:
             st.caption("AI Analysis sets these automatically. Edit only to override.")
             with st.form(f"edit_wl_{i}"):
                 we1, we2, we3 = st.columns(3)
-                ng = we1.number_input("Expected Growth %", value=float(w["expected_growth"]), min_value=1.0, step=1.0)
+                ng = we1.number_input("Expected Growth %", value=float(w["expected_growth"]), min_value=0.0, step=0.1)
                 np = we2.number_input("Max PEG",           value=float(w["peg_threshold"]),   min_value=0.1, step=0.1)
                 nm = we3.number_input("Min MOS %",         value=int(w["mos_pct"]*100),       min_value=5,   step=5) / 100
                 nt = st.text_area("Thesis", value=w.get("thesis", ""))
@@ -524,7 +545,7 @@ with tab2:
                 current_price = price_data.get("price", 0) if "error" not in price_data else 0
                 currency      = price_data.get("currency", "INR" if w["market"] == "IN" else "USD")
                 with st.spinner("Analysing (Groq → Gemini → OpenAI fallback)…"):
-                    result = _analyze_wl(w["ticker"], w["market"], current_price, currency, wl_news, docs or None)
+                    result = _analyze_wl(w["ticker"], w["market"], current_price, currency, wl_news, docs or None, use_cache=st.session_state.get("use_cache", True))
                 if "error" in result:
                     st.error(f"Analysis failed: {result['error']}")
                 else:
@@ -589,7 +610,7 @@ with tab2:
                 current_price = price_data.get("price", 0) if "error" not in price_data else 0
                 currency      = price_data.get("currency", "INR" if wl_market == "IN" else "USD")
                 with st.spinner(f"Analysing {wl_ticker}…"):
-                    result = _analyze_wl(wl_ticker, wl_market, current_price, currency, [], docs)
+                    result = _analyze_wl(wl_ticker, wl_market, current_price, currency, [], docs, use_cache=st.session_state.get("use_cache", True))
                 if "error" not in result:
                     new_wl.update(
                         expected_growth = result.get("expected_growth_pct",    20.0),

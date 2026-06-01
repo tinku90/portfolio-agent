@@ -39,7 +39,7 @@ Return ONLY valid JSON. Use null for any field you cannot estimate - do NOT gues
 
 
 def analyze_watchlist(ticker, market, current_price, currency,
-                      news_items=None, extra_texts=None) -> dict:
+                      news_items=None, extra_texts=None, use_cache=True) -> dict:
     news_text = "\n".join(f"- {n['title']}" for n in (news_items or [])[:10]) or "No recent news."
     docs_section = (
         "Uploaded documents:\n" + "\n\n---\n\n".join(
@@ -69,7 +69,7 @@ def analyze_watchlist(ticker, market, current_price, currency,
 
     # -- Step 1: LLM estimates inputs (fallback chain handles 429s) ------------
     try:
-        inp = complete_json([{"role": "user", "content": prompt}], max_tokens=600)
+        inp = complete_json([{"role": "user", "content": prompt}], max_tokens=600, use_cache=use_cache)
     except Exception as e:
         return {"error": str(e)}
     if "error" in inp:

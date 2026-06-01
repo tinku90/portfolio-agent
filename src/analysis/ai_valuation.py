@@ -60,7 +60,7 @@ def _get_market_facts(ticker, market, avg_cost, current_price, currency) -> dict
 
 
 def analyze_position(ticker, market, avg_cost, current_price, currency,
-                     news_items=None, extra_texts=None) -> dict:
+                     news_items=None, extra_texts=None, use_cache=True) -> dict:
     """
     Step 1: LLM returns estimated inputs (null if unknown, never guesses).
     Step 2: Python calculates DCF and PEG from those inputs.
@@ -85,7 +85,7 @@ def analyze_position(ticker, market, avg_cost, current_price, currency,
 
     # -- Step 1: LLM estimates inputs ------------------------------------------
     try:
-        inputs = complete_json([{"role": "user", "content": prompt}], max_tokens=600)
+        inputs = complete_json([{"role": "user", "content": prompt}], max_tokens=600, use_cache=use_cache)
     except Exception as e:
         return {"error": str(e)}
 

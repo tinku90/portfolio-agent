@@ -24,9 +24,11 @@ for _stream in (sys.stdout, sys.stderr):
 try:
     from src.analysis.token_saver import finance_optimize as _optimize, \
         cache_get, cache_set, cache_stats as _cache_stats, count_tokens as _count_tokens
+    from src.analysis.token_saver import response_cache as _rcache
     _TS_AVAILABLE = True
 except ImportError:
     _TS_AVAILABLE = False
+    _rcache = None
 
 # -- Model names ---------------------------------------------------------------
 GROQ_PRIMARY    = "llama-3.3-70b-versatile"
@@ -159,15 +161,26 @@ _PROVIDERS = [
 
 
 def complete(messages: list, response_format=None,
-             temperature: float = 0.1, max_tokens: int = 1000) -> str:
+             temperature: float = 0.1, max_tokens: int = 1000,
+             use_cache: bool = True) -> str:
     """
     Try each provider in order. Falls back on rate-limit or quota errors.
     Raises immediately on auth / format / non-quota errors from the first provider.
+    Identical requests are served from the disk response cache (use_cache=False to force fresh).
     """
     # TokenSaver: compress prompts before sending
     opt_msgs, ts = _optimize_messages(messages)
     if ts.get("savings_pct", 0) > 0:
         print(f"[TokenSaver] {ts['savings_pct']}% saved")
+
+    # LLM output cache: identical request -> served from disk, zero API cost
+    cache_key = None
+    if _rcache and use_cache:
+        cache_key = _rcache.make_key(opt_msgs, response_format, temperature, max_tokens)
+        hit = _rcache.get(cache_key)
+        if hit is not None:
+            print("[LLM cache] HIT - served from cache, no API call")
+            return hit
 
     errors      = []
     hard_failed = False   # a non-recoverable error occurred on the first provider
@@ -177,6 +190,8 @@ def complete(messages: list, response_format=None,
             print(f"[LLM] trying {name}...")
             result = fn(opt_msgs, response_format, temperature, max_tokens)
             print(f"[LLM] {name} OK")
+            if cache_key:
+                _rcache.set(cache_key, result)
             return result
         except Exception as e:
             err_str = f"{name}: {type(e).__name__}: {e}"
@@ -201,12 +216,22 @@ def complete(messages: list, response_format=None,
 
 
 def complete_json(messages: list, temperature: float = 0.1,
-                  max_tokens: int = 1000) -> dict:
+                  max_tokens: int = 1000, use_cache: bool = True) -> dict:
     raw = complete(messages,
                    response_format={"type": "json_object"},
                    temperature=temperature,
-                   max_tokens=max_tokens)
+                   max_tokens=max_tokens,
+                   use_cache=use_cache)
     return json.loads(raw)
+
+
+def response_cache_stats() -> dict:
+    return _rcache.stats() if _rcache else {"available": False}
+
+
+def clear_response_cache():
+    if _rcache:
+        _rcache.clear()
 
 
 # -- Vision (image -> text) with fallback ---------------------------------------
@@ -230,6 +255,15 @@ def complete_vision(prompt_text: str, image_b64: str, mime: str = "image/jpeg",
     ]
     messages = [{"role": "user", "content": content}]
     errors = []
+
+    # Cache by image bytes + prompt — re-uploading the same image is free
+    vkey = None
+    if _rcache:
+        vkey = _rcache.make_key([{"img": image_b64, "p": prompt_text}], None, 0, max_tokens)
+        hit = _rcache.get(vkey)
+        if hit is not None:
+            print("[Vision cache] HIT - image already extracted, no API call")
+            return hit
 
     for name, kind, model in _VISION_PROVIDERS:
         try:
@@ -257,7 +291,10 @@ def complete_vision(prompt_text: str, image_b64: str, mime: str = "image/jpeg",
                 resp = OpenAI(api_key=key).chat.completions.create(
                     model=model, messages=messages, max_tokens=max_tokens)
             print(f"[Vision] {name} OK")
-            return resp.choices[0].message.content
+            out = resp.choices[0].message.content
+            if vkey:
+                _rcache.set(vkey, out)
+            return out
         except Exception as e:
             errors.append(f"{name}: {type(e).__name__}: {e}")
             print(f"[Vision] {name} FAILED - {type(e).__name__}: {str(e)[:100]}")

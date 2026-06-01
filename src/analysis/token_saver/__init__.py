@@ -2,6 +2,7 @@
 import re
 from .rule_optimizer import rule_optimize, _PHRASE_RES
 from .hallucination_guard import prepare_prompt, validate_financial_response, ValidationResult
+from . import response_cache
 from .prompt_cache import cache_get, cache_set, cache_stats
 from .token_counter import count_tokens
 
